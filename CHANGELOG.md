@@ -15,6 +15,7 @@ All notable changes to this project are documented here. The format is based on 
 - `scripts/deploy.mjs` — deploy wrapper that uploads source maps to Sentry when `.sentryclirc` or `SENTRY_AUTH_TOKEN` is present, and skips gracefully otherwise.
 - `SENTRY_ORG` + `SENTRY_PROJECT` env vars to override the Sentry project target.
 - README "Observability (optional)" section + `SENTRY_*` rows in env/vars reference.
+- Setup script auto-detects the worker URL during step 8 (GitHub OAuth App registration). Reads `BASE_URL` from `wrangler.toml` on re-runs; on first runs falls back to Cloudflare's `/accounts/{id}/workers/subdomain` API using wrangler's stored OAuth token. Removes the "guess your worker URL" footgun.
 
 ### Changed
 

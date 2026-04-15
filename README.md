@@ -84,7 +84,7 @@ The script walks 10 interactive steps:
 5. Create (or reuse) Notion Followups + Call Transcripts databases
 6. Validate OpenAI API key
 7. Write `.dev.vars` + update `wrangler.toml` vars
-8. Register GitHub OAuth App (opens browser) + configure MCP KV + allowlist
+8. Register GitHub OAuth App (opens browser, auto-detects your worker URL) + configure MCP KV + allowlist
 9. Push every secret to Cloudflare (no manual `wrangler secret put` dance)
 10. `wrangler deploy`
 
