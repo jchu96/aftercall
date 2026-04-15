@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
 import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
+import type { Env } from "../../env";
 import { createGitHubAuthApp } from "./github";
 
 type McpEnv = Env & { OAUTH_PROVIDER: OAuthHelpers };
