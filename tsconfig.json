@@ -4,7 +4,7 @@
     "module": "ES2022",
     "moduleResolution": "bundler",
     "lib": ["ES2022"],
-    "types": ["@cloudflare/workers-types", "vitest"],
+    "types": ["@cloudflare/workers-types", "vitest", "vite/client", "@cloudflare/vitest-pool-workers"],
     "strict": true,
     "noEmit": true,
     "esModuleInterop": true,
