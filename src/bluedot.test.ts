@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   flattenTranscript,
   normalizeTranscriptEvent,
+  normalizeSummaryEvent,
   isTranscriptEvent,
+  isSummaryEvent,
   type BluedotWebhookPayload,
 } from "./bluedot";
 
@@ -62,25 +64,57 @@ describe("normalizeTranscriptEvent", () => {
 });
 
 describe("isTranscriptEvent", () => {
-  it("returns true for test 'transcript' type", () => {
+  it("matches transcript variants", () => {
     expect(isTranscriptEvent(SAMPLE)).toBe(true);
-  });
-
-  it("returns true for 'video.transcript.created' (older Svix replays)", () => {
     expect(isTranscriptEvent({ ...SAMPLE, type: "video.transcript.created" })).toBe(true);
-  });
-
-  it("returns true for 'meeting.transcript.created' (real live events)", () => {
     expect(isTranscriptEvent({ ...SAMPLE, type: "meeting.transcript.created" })).toBe(true);
   });
 
-  it("returns false for summary events in any namespace", () => {
+  it("rejects summary variants", () => {
     expect(isTranscriptEvent({ ...SAMPLE, type: "summary" })).toBe(false);
-    expect(isTranscriptEvent({ ...SAMPLE, type: "video.summary.created" })).toBe(false);
     expect(isTranscriptEvent({ ...SAMPLE, type: "meeting.summary.created" })).toBe(false);
   });
+});
 
-  it("returns false for unknown event types", () => {
-    expect(isTranscriptEvent({ ...SAMPLE, type: "something.else" })).toBe(false);
+describe("isSummaryEvent", () => {
+  it("matches summary variants", () => {
+    expect(isSummaryEvent({ ...SAMPLE, type: "summary" })).toBe(true);
+    expect(isSummaryEvent({ ...SAMPLE, type: "video.summary.created" })).toBe(true);
+    expect(isSummaryEvent({ ...SAMPLE, type: "meeting.summary.created" })).toBe(true);
+  });
+
+  it("rejects transcript variants", () => {
+    expect(isSummaryEvent(SAMPLE)).toBe(false);
+    expect(isSummaryEvent({ ...SAMPLE, type: "meeting.transcript.created" })).toBe(false);
+  });
+});
+
+describe("normalizeSummaryEvent", () => {
+  const SUMMARY_SAMPLE = {
+    type: "meeting.summary.created",
+    meetingId: "https://meet.google.com/test",
+    videoId: "v1",
+    title: "Sync",
+    createdAt: 1741087081,
+    attendees: ["a@x.com"],
+    summary: "Discussed Q2 priorities and Hannah promotion.",
+  };
+
+  it("uses summaryV2 when present, falls back to summary", () => {
+    const r1 = normalizeSummaryEvent({ ...SUMMARY_SAMPLE, summaryV2: "## V2 markdown" });
+    expect(r1.summaryText).toBe("## V2 markdown");
+    const r2 = normalizeSummaryEvent(SUMMARY_SAMPLE);
+    expect(r2.summaryText).toBe("Discussed Q2 priorities and Hannah promotion.");
+  });
+
+  it("extracts meetingUrl when meetingId is a URL", () => {
+    const r = normalizeSummaryEvent(SUMMARY_SAMPLE);
+    expect(r.meetingUrl).toBe("https://meet.google.com/test");
+  });
+
+  it("throws when both summary and summaryV2 missing", () => {
+    expect(() =>
+      normalizeSummaryEvent({ ...SUMMARY_SAMPLE, summary: undefined }),
+    ).toThrow(/missing summary/i);
   });
 });

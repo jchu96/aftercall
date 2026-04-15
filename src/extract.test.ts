@@ -1,18 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   EXTRACTION_SCHEMA,
-  extractFromTranscript,
-  type ExtractedSummary,
+  extractFromSummary,
+  type ExtractedFromSummary,
 } from "./extract";
 
-const fakeSummary: ExtractedSummary = {
-  title: "Weekly sync",
-  summary: "Discussed the roadmap and Q2 priorities.",
+const fakeExtracted: ExtractedFromSummary = {
   action_items: [
     { task: "Send notes", owner: "Alice", due_date: "Friday" },
-    { task: "Book conference room" },
+    { task: "Book room" },
   ],
-  participants: [{ name: "Alice" }, { name: "Bob", email: "bob@x.com" }],
+  participants: [{ name: "Alice", role: "PM" }, { name: "Bob" }],
 };
 
 function fakeOpenAI(content: object | string, opts: { reject?: unknown } = {}) {
@@ -22,7 +20,18 @@ function fakeOpenAI(content: object | string, opts: { reject?: unknown } = {}) {
       choices: [
         {
           message: {
-            content: typeof content === "string" ? content : JSON.stringify(content),
+            content: typeof content === "string" ? content : JSON.stringify({
+              action_items: fakeExtracted.action_items.map((a) => ({
+                task: a.task,
+                owner: a.owner ?? null,
+                due_date: a.due_date ?? null,
+              })),
+              participants: fakeExtracted.participants.map((p) => ({
+                name: p.name ?? null,
+                email: p.email ?? null,
+                role: p.role ?? null,
+              })),
+            }),
           },
         },
       ],
@@ -32,13 +41,8 @@ function fakeOpenAI(content: object | string, opts: { reject?: unknown } = {}) {
 }
 
 describe("EXTRACTION_SCHEMA", () => {
-  it("requires title, summary, action_items, participants", () => {
-    expect(EXTRACTION_SCHEMA.required).toEqual([
-      "title",
-      "summary",
-      "action_items",
-      "participants",
-    ]);
+  it("requires action_items and participants only (no title or summary)", () => {
+    expect(EXTRACTION_SCHEMA.required).toEqual(["action_items", "participants"]);
   });
 
   it("disallows additionalProperties (strict)", () => {
@@ -46,99 +50,66 @@ describe("EXTRACTION_SCHEMA", () => {
   });
 });
 
-describe("extractFromTranscript", () => {
-  beforeEach(() => {
-    vi.resetAllMocks();
-  });
+describe("extractFromSummary", () => {
+  beforeEach(() => vi.resetAllMocks());
 
-  it("returns parsed structured summary from OpenAI structured output", async () => {
-    const { client, create } = fakeOpenAI(fakeSummary);
-
-    const result = await extractFromTranscript(
-      { title: "Weekly sync", transcript: "Alice: hi\nBob: hello" },
-      { client, model: "gpt-4.1-nano" },
-    );
-
-    expect(result).toEqual(fakeSummary);
-    expect(create).toHaveBeenCalledOnce();
-    const args = (create.mock.calls[0] as never[])[0] as never as {
-      model: string;
-      response_format: { type: string; json_schema: { strict: boolean } };
-    };
-    expect(args.model).toBe("gpt-4.1-nano");
-    expect(args.response_format.type).toBe("json_schema");
-    expect(args.response_format.json_schema.strict).toBe(true);
-  });
-
-  it("includes attendees in user message when provided", async () => {
-    const { client, create } = fakeOpenAI(fakeSummary);
-
-    await extractFromTranscript(
-      {
-        title: "Sync",
-        transcript: "Some content",
-        attendees: [{ email: "alice@x.com" }],
-      },
+  it("extracts action items + participants from Bluedot summary text", async () => {
+    const { client } = fakeOpenAI({});
+    const result = await extractFromSummary(
+      { summary: "Discussed Q2; Alice will send notes Friday." },
       { client },
     );
+    expect(result).toEqual(fakeExtracted);
+  });
 
-    const messages = ((create.mock.calls[0] as never[])[0] as { messages: Array<{ role: string; content: string }> }).messages;
-    const userContent = messages.find((m) => m.role === "user")?.content ?? "";
+  it("includes attendees + title in user message when provided", async () => {
+    const { client, create } = fakeOpenAI({});
+    await extractFromSummary(
+      { summary: "x", title: "Weekly sync", attendees: ["alice@x.com"] },
+      { client },
+    );
+    const msgs = ((create.mock.calls[0] as never[])[0] as { messages: Array<{ role: string; content: string }> }).messages;
+    const userContent = msgs.find((m) => m.role === "user")?.content ?? "";
+    expect(userContent).toContain("Weekly sync");
     expect(userContent).toContain("alice@x.com");
   });
 
-  it("truncates very long transcripts", async () => {
-    const { client, create } = fakeOpenAI(fakeSummary);
-    const long = "a".repeat(200_000);
-
-    await extractFromTranscript({ title: "Long", transcript: long }, { client });
-
-    const messages = ((create.mock.calls[0] as never[])[0] as { messages: Array<{ role: string; content: string }> }).messages;
-    const userContent = messages.find((m) => m.role === "user")?.content ?? "";
-    expect(userContent.length).toBeLessThan(160_000);
-    expect(userContent).toContain("[truncated");
+  it("truncates summaries over 30K chars", async () => {
+    const { client, create } = fakeOpenAI({});
+    await extractFromSummary({ summary: "x".repeat(50_000) }, { client });
+    const userContent = ((create.mock.calls[0] as never[])[0] as { messages: Array<{ content: string }> }).messages[1].content;
+    expect(userContent).toContain("[truncated]");
   });
 
-  it("retries on 5xx errors and eventually succeeds", async () => {
-    const err = Object.assign(new Error("server error"), { status: 503 });
+  it("retries on 5xx errors", async () => {
+    const err = Object.assign(new Error("server"), { status: 503 });
     const create = vi
       .fn()
       .mockRejectedValueOnce(err)
       .mockResolvedValueOnce({
-        choices: [{ message: { content: JSON.stringify(fakeSummary) } }],
+        choices: [{ message: { content: JSON.stringify({ action_items: [], participants: [] }) } }],
       });
     const client = { chat: { completions: { create } } } as never;
-
-    const result = await extractFromTranscript(
-      { title: "x", transcript: "y" },
-      { client, retryDelayMs: 1 },
-    );
-
-    expect(result).toEqual(fakeSummary);
+    const result = await extractFromSummary({ summary: "x" }, { client, retryDelayMs: 1 });
+    expect(result.action_items).toEqual([]);
     expect(create).toHaveBeenCalledTimes(2);
   });
 
-  it("does not retry on 4xx errors", async () => {
-    const err = Object.assign(new Error("bad request"), { status: 400 });
+  it("does not retry 4xx", async () => {
+    const err = Object.assign(new Error("bad"), { status: 400 });
     const { client, create } = fakeOpenAI({}, { reject: err });
-
-    await expect(
-      extractFromTranscript({ title: "x", transcript: "y" }, { client, retryDelayMs: 1 }),
-    ).rejects.toThrow(/bad request/);
+    await expect(extractFromSummary({ summary: "x" }, { client, retryDelayMs: 1 })).rejects.toThrow(/bad/);
     expect(create).toHaveBeenCalledOnce();
   });
 
-  it("throws when OpenAI returns invalid JSON", async () => {
-    const { client } = fakeOpenAI("not json {{");
-
-    await expect(
-      extractFromTranscript({ title: "x", transcript: "y" }, { client }),
-    ).rejects.toThrow(/parse/i);
+  it("throws on invalid JSON from OpenAI", async () => {
+    const { client } = fakeOpenAI("not json");
+    await expect(extractFromSummary({ summary: "x" }, { client })).rejects.toThrow(/parse/i);
   });
 
   it("uses default model when not specified", async () => {
-    const { client, create } = fakeOpenAI(fakeSummary);
-    await extractFromTranscript({ title: "x", transcript: "y" }, { client });
+    const { client, create } = fakeOpenAI({});
+    await extractFromSummary({ summary: "x" }, { client });
     expect(((create.mock.calls[0] as never[])[0] as { model: string }).model).toBe("gpt-4.1-nano");
   });
 });

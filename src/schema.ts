@@ -24,12 +24,23 @@ export interface Participant {
   role?: string;
 }
 
+/**
+ * Transcripts table — populated by two Bluedot events that fire ~13s apart
+ * for the same meetingId. Each event upserts the row with its own data.
+ *
+ * - meeting.transcript.created → raw_text, language, participants_basic
+ * - meeting.summary.created    → summary (Bluedot), action_items (extracted)
+ *
+ * Notion writes (transcript page + followups) only happen once both have
+ * arrived AND notion_synced_at is null. Tracked here so we never double-post.
+ */
 export const transcripts = sqliteTable("transcripts", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   videoId: text("video_id").notNull().unique(),
   title: text("title").notNull(),
-  rawText: text("raw_text").notNull(),
-  summary: text("summary").notNull(),
+  rawText: text("raw_text"),
+  summary: text("summary"),
+  bluedotSummary: text("bluedot_summary"),
   participants: text("participants", { mode: "json" })
     .$type<Participant[]>()
     .notNull()
@@ -40,6 +51,8 @@ export const transcripts = sqliteTable("transcripts", {
     .default(sql`'[]'`),
   language: text("language"),
   svixId: text("svix_id"),
+  notionPageId: text("notion_page_id"),
+  notionSyncedAt: text("notion_synced_at"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),

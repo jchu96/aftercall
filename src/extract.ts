@@ -1,17 +1,18 @@
 import OpenAI from "openai";
 import type { ActionItem, Participant } from "./schema";
 
-export interface ExtractedSummary {
-  title: string;
-  summary: string;
+export interface ExtractedFromSummary {
   action_items: ActionItem[];
   participants: Participant[];
 }
 
 export interface ExtractInput {
-  title: string;
-  transcript: string;
-  attendees?: Array<{ email?: string; name?: string }>;
+  /** Bluedot's already-summarized text — much smaller than full transcript */
+  summary: string;
+  /** Optional: meeting title for context */
+  title?: string;
+  /** Optional: attendee emails from Bluedot */
+  attendees?: string[];
 }
 
 export interface ExtractOptions {
@@ -22,25 +23,21 @@ export interface ExtractOptions {
 }
 
 export const DEFAULT_MODEL = "gpt-4.1-nano";
-const MAX_TRANSCRIPT_CHARS = 150_000;
+const MAX_SUMMARY_CHARS = 30_000;
 
-const SYSTEM_PROMPT = `You are an expert assistant that extracts structured information from meeting transcripts.
+const SYSTEM_PROMPT = `You are an expert assistant that extracts structured follow-up tasks from a meeting summary.
 
-Given a transcript, produce:
-- title: a concise, descriptive title (improve the provided one if needed)
-- summary: 2-4 sentences capturing topics and outcomes
-- action_items: discrete follow-up tasks. Capture owner when stated ("I'll send the doc" → owner = speaker). Capture due_date in natural language ("Friday", "next week", "2026-05-01") when mentioned.
-- participants: people who spoke or were mentioned as attending
+Given a meeting summary (already condensed), produce:
+- action_items: discrete tasks that someone committed to do. Capture owner when identifiable ("Andy will...") and due_date in natural language ("Friday", "next week", "2026-05-01") when stated. Skip vague suggestions; only concrete commitments.
+- participants: people who participated, with role/title if mentioned
 
-Be specific. Prefer concrete action items over generic recommendations.`;
+Be specific and actionable. Each action item should be something a human could check off later.`;
 
 export const EXTRACTION_SCHEMA = {
   type: "object" as const,
   additionalProperties: false,
-  required: ["title", "summary", "action_items", "participants"],
+  required: ["action_items", "participants"],
   properties: {
-    title: { type: "string" as const },
-    summary: { type: "string" as const },
     action_items: {
       type: "array" as const,
       items: {
@@ -71,39 +68,27 @@ export const EXTRACTION_SCHEMA = {
 };
 
 function buildUserMessage(input: ExtractInput): string {
+  const titleBlock = input.title ? `Meeting title: ${input.title}\n\n` : "";
   const attendeesBlock =
     input.attendees && input.attendees.length > 0
-      ? `Attendees from calendar:\n${input.attendees
-          .map((a) => `- ${a.name ?? "unknown"}${a.email ? ` <${a.email}>` : ""}`)
-          .join("\n")}\n\n`
+      ? `Attendees: ${input.attendees.join(", ")}\n\n`
       : "";
 
-  let transcript = input.transcript;
-  if (transcript.length > MAX_TRANSCRIPT_CHARS) {
-    const head = transcript.slice(0, Math.floor(MAX_TRANSCRIPT_CHARS * 0.7));
-    const tail = transcript.slice(-Math.floor(MAX_TRANSCRIPT_CHARS * 0.2));
-    transcript = `${head}\n\n[truncated ${input.transcript.length - head.length - tail.length} chars]\n\n${tail}`;
+  let summary = input.summary;
+  if (summary.length > MAX_SUMMARY_CHARS) {
+    summary = summary.slice(0, MAX_SUMMARY_CHARS) + "\n\n[truncated]";
   }
 
-  return `Meeting title: ${input.title}
-
-${attendeesBlock}Transcript:
+  return `${titleBlock}${attendeesBlock}Bluedot summary:
 """
-${transcript}
+${summary}
 """
 
-Extract the structured information per the schema.`;
+Extract action items + participants per the schema.`;
 }
 
-/**
- * Strip nulls from optional fields back to undefined so consumers see clean shape.
- * Strict json_schema requires all properties be in `required`, so OpenAI returns
- * `null` for fields that don't apply — convert back to `undefined` here.
- */
-function cleanResult(raw: ExtractedSummary): ExtractedSummary {
+function cleanResult(raw: ExtractedFromSummary): ExtractedFromSummary {
   return {
-    title: raw.title,
-    summary: raw.summary,
     action_items: raw.action_items.map((a) => ({
       task: a.task,
       ...(a.owner != null && { owner: a.owner }),
@@ -117,10 +102,10 @@ function cleanResult(raw: ExtractedSummary): ExtractedSummary {
   };
 }
 
-export async function extractFromTranscript(
+export async function extractFromSummary(
   input: ExtractInput,
   options: ExtractOptions,
-): Promise<ExtractedSummary> {
+): Promise<ExtractedFromSummary> {
   const model = options.model ?? DEFAULT_MODEL;
   const retries = options.retries ?? 3;
   const retryDelayMs = options.retryDelayMs ?? 500;
@@ -137,7 +122,7 @@ export async function extractFromTranscript(
         response_format: {
           type: "json_schema",
           json_schema: {
-            name: "transcript_extraction",
+            name: "summary_extraction",
             strict: true,
             schema: EXTRACTION_SCHEMA,
           },
@@ -147,9 +132,9 @@ export async function extractFromTranscript(
       const content = response.choices[0]?.message?.content;
       if (!content) throw new Error("OpenAI returned empty content");
 
-      let parsed: ExtractedSummary;
+      let parsed: ExtractedFromSummary;
       try {
-        parsed = JSON.parse(content) as ExtractedSummary;
+        parsed = JSON.parse(content) as ExtractedFromSummary;
       } catch (err) {
         throw new Error(`Failed to parse OpenAI response as JSON: ${(err as Error).message}`);
       }
