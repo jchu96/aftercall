@@ -24,6 +24,7 @@ export interface BluedotWebhookPayload {
   attendees?: string[];
   transcript?: BluedotTranscriptUtterance[];
   summary?: string;
+  summaryV2?: string;
   language?: string;
 }
 
@@ -85,15 +86,53 @@ export function normalizeTranscriptEvent(payload: BluedotWebhookPayload): Normal
 
 /**
  * Bluedot's event type field has varied across sources (empirically observed):
- *   - `transcript` (dashboard test-webhook button)
- *   - `video.transcript.created` (Svix replays of older events)
- *   - `meeting.transcript.created` (real live events today)
- *
- * We accept any of these, and explicitly reject the summary counterparts
- * (which lack the transcript[] field we need to embed).
+ *   - `transcript` / `summary` (dashboard test-webhook button)
+ *   - `video.transcript.created` / `video.summary.created` (Svix replays)
+ *   - `meeting.transcript.created` / `meeting.summary.created` (live)
  */
 export function isTranscriptEvent(payload: BluedotWebhookPayload): boolean {
   const t = payload.type ?? "";
   if (t.includes("summary")) return false;
   return t === "transcript" || t.endsWith(".transcript.created");
+}
+
+export function isSummaryEvent(payload: BluedotWebhookPayload): boolean {
+  const t = payload.type ?? "";
+  return t === "summary" || t.endsWith(".summary.created");
+}
+
+export interface NormalizedSummaryEvent {
+  videoId: string;
+  title: string;
+  /** Bluedot's prose summary text (the input we pass to OpenAI) */
+  summaryText: string;
+  attendees: string[];
+  createdAt?: Date;
+  meetingUrl?: string;
+}
+
+export function normalizeSummaryEvent(
+  payload: BluedotWebhookPayload & { summary?: string; summaryV2?: string },
+): NormalizedSummaryEvent {
+  const summaryText = payload.summaryV2 || payload.summary || "";
+  if (!summaryText) {
+    throw new Error("Bluedot summary event missing summary/summaryV2 text");
+  }
+
+  const rawMeetingId = payload.meetingId || payload.videoId;
+  let meetingUrl: string | undefined;
+  if (rawMeetingId.startsWith("http://") || rawMeetingId.startsWith("https://")) {
+    meetingUrl = rawMeetingId;
+  } else if (rawMeetingId.includes("meet.google.com/") || rawMeetingId.includes("zoom.us/")) {
+    meetingUrl = `https://${rawMeetingId}`;
+  }
+
+  return {
+    videoId: rawMeetingId,
+    title: payload.title || "Untitled meeting",
+    summaryText,
+    attendees: payload.attendees ?? [],
+    createdAt: payload.createdAt ? new Date(payload.createdAt * 1000) : undefined,
+    meetingUrl,
+  };
 }

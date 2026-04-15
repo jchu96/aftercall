@@ -5,21 +5,19 @@ compatibility_flags = ["nodejs_compat"]
 
 # Vars (non-secret, set via setup script)
 [vars]
-OPENAI_EXTRACTION_MODEL = "gpt-4.1-nano"
-NOTION_TRANSCRIPTS_DATA_SOURCE_ID = ""
-NOTION_FOLLOWUPS_DATA_SOURCE_ID = ""
+OPENAI_EXTRACTION_MODEL = "gpt-5.4-nano"
+NOTION_TRANSCRIPTS_DATA_SOURCE_ID = "e22e1006-52c9-48f3-85c6-a55c5cc6d991"
+NOTION_FOLLOWUPS_DATA_SOURCE_ID = "f04d875e-00a1-4241-8ee1-c73217310212"
 
-# D1 binding (filled in by setup script)
 [[d1_databases]]
 binding = "DB"
-database_name = "bluedot-rag-db-dev"
-database_id = "8548e955-5967-409f-a5a0-9a01eb78ab61"
+database_name = "bluedot-rag-db"
+database_id = "8aab7a8b-e319-4f96-a1ce-175540a266cc"
 migrations_dir = "drizzle"
 
-# Vectorize binding (filled in by setup script)
 [[vectorize]]
 binding = "VECTORIZE"
-index_name = "bluedot-rag-vectors-dev"
+index_name = "bluedot-rag-vectors"
 remote = true
 
 # Secrets (set via `wrangler secret put`):

@@ -8,6 +8,7 @@ beforeEach(async () => {
 });
 
 const TEST_SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw";
+const VIDEO_ID = "https://meet.google.com/test-mtg";
 
 async function signedRequest(payload: unknown): Promise<Request> {
   const body = JSON.stringify(payload);
@@ -38,30 +39,40 @@ async function signedRequest(payload: unknown): Promise<Request> {
   });
 }
 
-function transcriptPayload(overrides: Record<string, unknown> = {}) {
+function transcriptPayload() {
   return {
     type: "meeting.transcript.created",
-    meetingId: "https://meet.google.com/test-mtg-id",
-    videoId: "v_test",
+    meetingId: VIDEO_ID,
+    videoId: "v1",
     title: "Test sync",
     createdAt: 1741088306,
     attendees: ["alice@example.com"],
-    transcript: [
-      { speaker: "Speaker: A", text: "Hi." },
-      { speaker: "Speaker: B", text: "Hello." },
-    ],
-    ...overrides,
+    transcript: [{ speaker: "Speaker: A", text: "Hi" }, { speaker: "Speaker: B", text: "Hello" }],
   };
 }
 
-const fakeSummary = {
-  title: "Test sync",
-  summary: "Brief test discussion.",
+function summaryPayload() {
+  return {
+    type: "meeting.summary.created",
+    meetingId: VIDEO_ID,
+    videoId: "v1",
+    title: "Test sync",
+    createdAt: 1741087081,
+    attendees: ["alice@example.com"],
+    summary: "Brief discussion about Q2.",
+    summaryV2: "## Overview\n\nBrief discussion about Q2 priorities.",
+  };
+}
+
+const fakeExtraction = {
   action_items: [
-    { task: "Send notes", owner: "Alice", due_date: "Friday" },
-    { task: "Book room" },
+    { task: "Send notes", owner: "Alice", due_date: null },
+    { task: "Book room", owner: null, due_date: null },
   ],
-  participants: [{ name: "Alice" }, { name: "Bob" }],
+  participants: [
+    { name: "Alice", email: null, role: null },
+    { name: "Bob", email: null, role: "PM" },
+  ],
 };
 
 function makeDeps(overrides: Partial<HandlerDeps> = {}): HandlerDeps {
@@ -69,25 +80,7 @@ function makeDeps(overrides: Partial<HandlerDeps> = {}): HandlerDeps {
     chat: {
       completions: {
         create: vi.fn().mockResolvedValue({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({
-                  ...fakeSummary,
-                  action_items: fakeSummary.action_items.map((a) => ({
-                    task: a.task,
-                    owner: a.owner ?? null,
-                    due_date: a.due_date ?? null,
-                  })),
-                  participants: fakeSummary.participants.map((p) => ({
-                    name: p.name ?? null,
-                    email: null,
-                    role: null,
-                  })),
-                }),
-              },
-            },
-          ],
+          choices: [{ message: { content: JSON.stringify(fakeExtraction) } }],
         }),
       },
     },
@@ -99,26 +92,96 @@ function makeDeps(overrides: Partial<HandlerDeps> = {}): HandlerDeps {
   } as never;
 
   const notion = {
-    pagesCreate: vi.fn().mockResolvedValue({
-      id: "page_id",
-      url: "https://notion.so/page_id",
-    }),
+    pagesCreate: vi.fn().mockResolvedValue({ id: "page_1", url: "https://notion.so/page_1" }),
   };
 
-  // Mock Vectorize binding (miniflare doesn't support it)
   env.VECTORIZE = {
     upsert: vi.fn().mockResolvedValue({ mutationId: "m1" }),
   } as unknown as VectorizeIndex;
 
-  return {
-    openai,
-    notion,
-    env,
-    ...overrides,
-  };
+  return { openai, notion, env, ...overrides };
 }
 
-describe("handleWebhook", () => {
+describe("handleWebhook — single event arrival", () => {
+  it("transcript event alone: writes raw_text + embeddings, no Notion writes", async () => {
+    const deps = makeDeps();
+    const res = await handleWebhook(await signedRequest(transcriptPayload()), deps);
+    expect(res.status).toBe(200);
+
+    expect(env.VECTORIZE.upsert).toHaveBeenCalledOnce();
+    expect(deps.notion.pagesCreate).not.toHaveBeenCalled();
+    expect(deps.openai.chat.completions.create).not.toHaveBeenCalled(); // no extraction yet
+
+    const row = await env.DB
+      .prepare("SELECT raw_text, summary, notion_synced_at FROM transcripts WHERE video_id = ?")
+      .bind(VIDEO_ID)
+      .first<{ raw_text: string; summary: string | null; notion_synced_at: string | null }>();
+    expect(row?.raw_text).toBeTruthy();
+    expect(row?.summary).toBeNull();
+    expect(row?.notion_synced_at).toBeNull();
+  });
+
+  it("summary event alone: extracts via OpenAI, writes summary, no Notion (transcript missing)", async () => {
+    const deps = makeDeps();
+    const res = await handleWebhook(await signedRequest(summaryPayload()), deps);
+    expect(res.status).toBe(200);
+
+    expect(deps.openai.chat.completions.create).toHaveBeenCalledOnce();
+    expect(deps.notion.pagesCreate).not.toHaveBeenCalled(); // transcript not yet
+    expect(env.VECTORIZE.upsert).not.toHaveBeenCalled();
+
+    const row = await env.DB
+      .prepare("SELECT raw_text, summary, action_items FROM transcripts WHERE video_id = ?")
+      .bind(VIDEO_ID)
+      .first<{ raw_text: string | null; summary: string; action_items: string }>();
+    expect(row?.raw_text).toBeNull();
+    expect(row?.summary).toBeTruthy();
+    expect(JSON.parse(row!.action_items)).toHaveLength(2);
+  });
+});
+
+describe("handleWebhook — both events arrive", () => {
+  it("transcript first then summary: triggers Notion writes on summary event", async () => {
+    const deps1 = makeDeps();
+    await handleWebhook(await signedRequest(transcriptPayload()), deps1);
+    expect(deps1.notion.pagesCreate).not.toHaveBeenCalled();
+
+    const deps2 = makeDeps();
+    await handleWebhook(await signedRequest(summaryPayload()), deps2);
+    // 1 transcript page + 2 followups = 3 Notion calls
+    expect(deps2.notion.pagesCreate).toHaveBeenCalledTimes(3);
+
+    const row = await env.DB
+      .prepare("SELECT notion_synced_at FROM transcripts WHERE video_id = ?")
+      .bind(VIDEO_ID)
+      .first<{ notion_synced_at: string }>();
+    expect(row?.notion_synced_at).toBeTruthy();
+  });
+
+  it("summary first then transcript: triggers Notion writes on transcript event", async () => {
+    const deps1 = makeDeps();
+    await handleWebhook(await signedRequest(summaryPayload()), deps1);
+    expect(deps1.notion.pagesCreate).not.toHaveBeenCalled();
+
+    const deps2 = makeDeps();
+    await handleWebhook(await signedRequest(transcriptPayload()), deps2);
+    expect(deps2.notion.pagesCreate).toHaveBeenCalledTimes(3);
+  });
+
+  it("retried summary event after Notion already synced does not double-post", async () => {
+    const deps1 = makeDeps();
+    await handleWebhook(await signedRequest(transcriptPayload()), deps1);
+    const deps2 = makeDeps();
+    await handleWebhook(await signedRequest(summaryPayload()), deps2);
+    expect(deps2.notion.pagesCreate).toHaveBeenCalledTimes(3);
+
+    const deps3 = makeDeps();
+    await handleWebhook(await signedRequest(summaryPayload()), deps3);
+    expect(deps3.notion.pagesCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleWebhook — error handling", () => {
   it("returns 405 for non-POST", async () => {
     const res = await handleWebhook(
       new Request("http://localhost/", { method: "GET" }),
@@ -137,107 +200,22 @@ describe("handleWebhook", () => {
         "svix-signature": "v1,invalid",
       },
     });
-    const res = await handleWebhook(req, makeDeps());
-    expect(res.status).toBe(401);
+    expect((await handleWebhook(req, makeDeps())).status).toBe(401);
   });
 
-  it("skips summary events with 200", async () => {
-    const req = await signedRequest({
-      type: "meeting.summary.created",
-      meetingId: "x",
-      videoId: "v",
-      title: "x",
-      summary: "Bluedot's summary",
-    });
-    const deps = makeDeps();
-    const res = await handleWebhook(req, deps);
+  it("ignores unknown event types with 200", async () => {
+    const res = await handleWebhook(
+      await signedRequest({ type: "video.recording.started", meetingId: "x", videoId: "v", title: "x" }),
+      makeDeps(),
+    );
     expect(res.status).toBe(200);
-    expect(await res.text()).toContain("ignored");
-    expect(deps.openai.chat.completions.create).not.toHaveBeenCalled();
   });
 
-  it("runs full pipeline for valid transcript: D1 + Vectorize + Notion + Followups", async () => {
-    const req = await signedRequest(transcriptPayload());
-    const deps = makeDeps();
-    const res = await handleWebhook(req, deps);
-
-    expect(res.status).toBe(200);
-    expect(deps.openai.chat.completions.create).toHaveBeenCalledOnce();
-    expect(deps.openai.embeddings.create).toHaveBeenCalledOnce();
-    expect(env.VECTORIZE.upsert).toHaveBeenCalledOnce();
-    // 1 transcript page + 2 followup rows = 3 Notion pages
-    expect(deps.notion.pagesCreate).toHaveBeenCalledTimes(3);
-
-    const row = await env.DB
-      .prepare("SELECT video_id, title FROM transcripts WHERE video_id = ?")
-      .bind("https://meet.google.com/test-mtg-id")
-      .first();
-    expect(row).toMatchObject({
-      video_id: "https://meet.google.com/test-mtg-id",
-      title: "Test sync",
-    });
-  });
-
-  it("dedupes concurrent retries — 2nd call sees existing row, skips Notion", async () => {
-    const req1 = await signedRequest(transcriptPayload());
-    const req2 = await signedRequest(transcriptPayload());
-    const deps1 = makeDeps();
-    const deps2 = makeDeps();
-
-    const [res1, res2] = await Promise.all([
-      handleWebhook(req1, deps1),
-      handleWebhook(req2, deps2),
-    ]);
-
-    // Both succeed
-    expect(res1.status).toBe(200);
-    expect(res2.status).toBe(200);
-
-    // Exactly one of them inserted, the other deduped
-    const insertCalls =
-      (deps1.notion.pagesCreate as ReturnType<typeof vi.fn>).mock.calls.length +
-      (deps2.notion.pagesCreate as ReturnType<typeof vi.fn>).mock.calls.length;
-    expect(insertCalls).toBe(3); // only one ran the full Notion pipeline
-
-    const { results } = await env.DB
-      .prepare("SELECT COUNT(*) as count FROM transcripts WHERE video_id = ?")
-      .bind("https://meet.google.com/test-mtg-id")
-      .all();
-    expect(results[0].count).toBe(1);
-  });
-
-  it("returns 200 even when Notion transcript page fails (DB is source of truth)", async () => {
-    const req = await signedRequest(transcriptPayload());
-    const deps = makeDeps({
-      notion: {
-        pagesCreate: vi.fn().mockRejectedValue(new Error("Notion 500")),
-      },
-    });
-    const res = await handleWebhook(req, deps);
-    expect(res.status).toBe(200);
-
-    const row = await env.DB
-      .prepare("SELECT video_id FROM transcripts WHERE video_id = ?")
-      .bind("https://meet.google.com/test-mtg-id")
-      .first();
-    expect(row).toBeTruthy();
-  });
-
-  it("returns 500 when extraction fails (so Svix retries)", async () => {
-    const req = await signedRequest(transcriptPayload());
+  it("returns 500 when extraction fails on summary event", async () => {
     const deps = makeDeps();
     (deps.openai.chat.completions.create as ReturnType<typeof vi.fn>).mockRejectedValue(
       Object.assign(new Error("openai down"), { status: 500 }),
     );
-    const res = await handleWebhook(req, deps);
-    expect(res.status).toBe(500);
-  });
-
-  it("returns 400 on empty transcript array", async () => {
-    const req = await signedRequest(transcriptPayload({ transcript: [] }));
-    const deps = makeDeps();
-    const res = await handleWebhook(req, deps);
-    expect(res.status).toBe(400);
-    expect(deps.openai.chat.completions.create).not.toHaveBeenCalled();
+    expect((await handleWebhook(await signedRequest(summaryPayload()), deps)).status).toBe(500);
   });
 });

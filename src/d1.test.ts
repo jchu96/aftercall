@@ -1,90 +1,116 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
-import { writeTranscript, type TranscriptWriteInput } from "./d1";
+import {
+  upsertFromTranscriptEvent,
+  upsertFromSummaryEvent,
+  markNotionSynced,
+  type TranscriptEventInput,
+  type SummaryEventInput,
+} from "./d1";
 import { setupD1 } from "../test/setup-d1";
 
 beforeEach(async () => {
   await setupD1();
 });
 
-const baseInput: TranscriptWriteInput = {
-  videoId: "vid_abc",
-  svixId: "msg_abc",
-  title: "Test call",
-  rawText: "hello world",
-  summary: "we said hello",
-  participants: [{ name: "Jeremy" }],
-  actionItems: [{ task: "follow up" }],
+const VIDEO_ID = "https://meet.google.com/test";
+
+const transcriptInput: TranscriptEventInput = {
+  videoId: VIDEO_ID,
+  svixId: "msg_t",
+  title: "Test sync",
+  rawText: "Alice: hi\nBob: hello",
+  participants: [{ email: "a@x.com" }, { email: "b@x.com" }],
   language: "en",
 };
 
-describe("writeTranscript (against real D1)", () => {
-  it("inserts a new transcript and returns the row id", async () => {
-    const result = await writeTranscript(env.DB, baseInput);
+const summaryInput: SummaryEventInput = {
+  videoId: VIDEO_ID,
+  svixId: "msg_s",
+  title: "Test sync",
+  bluedotSummary: "Discussed Q2 priorities.",
+  summary: "Discussed Q2 priorities.",
+  participants: [{ name: "Alice" }, { name: "Bob", role: "PM" }],
+  actionItems: [
+    { task: "Send notes", owner: "Alice", due_date: "Friday" },
+    { task: "Book room" },
+  ],
+};
 
-    expect(result.inserted).toBe(true);
-    expect(typeof result.transcriptId).toBe("number");
-
-    const row = await env.DB
-      .prepare("SELECT id, video_id, title FROM transcripts WHERE video_id = ?")
-      .bind(baseInput.videoId)
-      .first();
-    expect(row).toMatchObject({ video_id: "vid_abc", title: "Test call" });
+describe("upsertFromTranscriptEvent", () => {
+  it("inserts a new row when none exists", async () => {
+    const r = await upsertFromTranscriptEvent(env.DB, transcriptInput);
+    expect(r.inserted).toBe(true);
+    expect(r.bothEventsPresent).toBe(false);
+    expect(r.alreadyNotionSynced).toBe(false);
   });
 
-  it("is idempotent — second insert with same video_id returns inserted: false", async () => {
-    const first = await writeTranscript(env.DB, baseInput);
-    const second = await writeTranscript(env.DB, baseInput);
-
-    expect(first.inserted).toBe(true);
-    expect(second.inserted).toBe(false);
-    expect(second.transcriptId).toBeUndefined();
-
-    const { results } = await env.DB
-      .prepare("SELECT COUNT(*) as count FROM transcripts WHERE video_id = ?")
-      .bind(baseInput.videoId)
-      .all();
-    expect(results[0].count).toBe(1);
+  it("is idempotent on retry — second call sees existing row", async () => {
+    await upsertFromTranscriptEvent(env.DB, transcriptInput);
+    const r = await upsertFromTranscriptEvent(env.DB, transcriptInput);
+    expect(r.inserted).toBe(false);
   });
 
-  it("serializes participants and action_items as JSON", async () => {
-    const result = await writeTranscript(env.DB, {
-      ...baseInput,
-      videoId: "vid_json",
-      participants: [{ name: "Alice", email: "a@x.com" }, { name: "Bob" }],
-      actionItems: [
-        { task: "Send notes", owner: "Alice", due_date: "Friday" },
-      ],
-    });
+  it("after summary event arrived first, sets bothEventsPresent: true", async () => {
+    await upsertFromSummaryEvent(env.DB, summaryInput);
+    const r = await upsertFromTranscriptEvent(env.DB, transcriptInput);
+    expect(r.inserted).toBe(false);
+    expect(r.bothEventsPresent).toBe(true);
+  });
+});
 
-    const row = await env.DB
-      .prepare("SELECT participants, action_items FROM transcripts WHERE id = ?")
-      .bind(result.transcriptId!)
-      .first();
-
-    const participants = JSON.parse(row!.participants as string);
-    const actionItems = JSON.parse(row!.action_items as string);
-
-    expect(participants).toEqual([
-      { name: "Alice", email: "a@x.com" },
-      { name: "Bob" },
-    ]);
-    expect(actionItems).toEqual([
-      { task: "Send notes", owner: "Alice", due_date: "Friday" },
-    ]);
+describe("upsertFromSummaryEvent", () => {
+  it("inserts a new row when none exists", async () => {
+    const r = await upsertFromSummaryEvent(env.DB, summaryInput);
+    expect(r.inserted).toBe(true);
+    expect(r.bothEventsPresent).toBe(false);
   });
 
-  it("handles missing optional language", async () => {
-    const result = await writeTranscript(env.DB, {
-      ...baseInput,
-      videoId: "vid_nolang",
-      language: undefined,
-    });
+  it("is idempotent on retry", async () => {
+    await upsertFromSummaryEvent(env.DB, summaryInput);
+    const r = await upsertFromSummaryEvent(env.DB, summaryInput);
+    expect(r.inserted).toBe(false);
+  });
 
+  it("after transcript event arrived first, sets bothEventsPresent: true", async () => {
+    await upsertFromTranscriptEvent(env.DB, transcriptInput);
+    const r = await upsertFromSummaryEvent(env.DB, summaryInput);
+    expect(r.inserted).toBe(false);
+    expect(r.bothEventsPresent).toBe(true);
+  });
+
+  it("preserves raw_text from earlier transcript event", async () => {
+    await upsertFromTranscriptEvent(env.DB, transcriptInput);
+    await upsertFromSummaryEvent(env.DB, summaryInput);
     const row = await env.DB
-      .prepare("SELECT language FROM transcripts WHERE id = ?")
-      .bind(result.transcriptId!)
-      .first();
-    expect(row!.language).toBeNull();
+      .prepare("SELECT raw_text, summary, action_items FROM transcripts WHERE video_id = ?")
+      .bind(VIDEO_ID)
+      .first<{ raw_text: string; summary: string; action_items: string }>();
+    expect(row?.raw_text).toBe("Alice: hi\nBob: hello");
+    expect(row?.summary).toBe("Discussed Q2 priorities.");
+    expect(JSON.parse(row!.action_items)).toHaveLength(2);
+  });
+});
+
+describe("markNotionSynced", () => {
+  it("returns true when transitioning from unsynced to synced", async () => {
+    await upsertFromTranscriptEvent(env.DB, transcriptInput);
+    const row = await env.DB
+      .prepare("SELECT id FROM transcripts WHERE video_id = ?")
+      .bind(VIDEO_ID)
+      .first<{ id: number }>();
+    const ok = await markNotionSynced(env.DB, row!.id, "page_xyz");
+    expect(ok).toBe(true);
+  });
+
+  it("returns false on second call (already synced)", async () => {
+    await upsertFromTranscriptEvent(env.DB, transcriptInput);
+    const row = await env.DB
+      .prepare("SELECT id FROM transcripts WHERE video_id = ?")
+      .bind(VIDEO_ID)
+      .first<{ id: number }>();
+    await markNotionSynced(env.DB, row!.id, "page_xyz");
+    const second = await markNotionSynced(env.DB, row!.id, "page_xyz");
+    expect(second).toBe(false);
   });
 });
