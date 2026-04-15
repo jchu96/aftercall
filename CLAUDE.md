@@ -13,6 +13,7 @@ Cloudflare Worker that ingests Bluedot meeting transcripts → OpenAI extraction
 | Output | Notion API (direct fetch — NOT `@notionhq/client`, broken in workerd) |
 | MCP server | `@modelcontextprotocol/sdk` Streamable HTTP (stateless mode) |
 | MCP auth | `@cloudflare/workers-oauth-provider` + GitHub OAuth, KV-backed |
+| Observability | `@sentry/cloudflare` (optional — no-op when `SENTRY_DSN` unset) |
 
 Single user (GitHub username allowlist via `ALLOWED_USERS` env). Friends fork to host their own.
 
@@ -27,6 +28,8 @@ Single user (GitHub username allowlist via `ALLOWED_USERS` env). Friends fork to
 - **MCP transport is stateless** — one transport per request, `enableJsonResponse: true`, no `Mcp-Session-Id`. No cross-request state; simpler to reason about.
 - **MCP tools are pure functions** colocated under `src/mcp/tools/` — each accepts `(args, env, deps?)` and returns a `{ content: [{ type: "text", text }] }` shape. Tests call these directly (no SDK) for fast, isolated unit tests.
 - **`src/mcp/handler.ts` dynamic-imports `./tools`** so loading the OAuth-wrapped worker in non-MCP tests doesn't pull the SDK + ajv into scope (vitest-pool-workers can't resolve ajv's internal JSON import in its ESM shim). If you add new MCP wiring, keep the dynamic-import boundary.
+- **Sentry is optional** — `src/index.ts` calls `Sentry.withSentry` with `enabled: Boolean(env.SENTRY_DSN)` so forkers without a DSN get a no-op. `scripts/deploy.mjs` checks for `.sentryclirc` / `SENTRY_AUTH_TOKEN` before invoking `sentry-cli`; otherwise it just runs `wrangler deploy`. Don't couple new code to Sentry being present — always guard with `enabled`/env checks.
+- **Pipeline tracing lives in `handler.ts`** — `Sentry.startSpan` wraps each stage (`openai.extract`, `openai.embed`, `d1.upsert_*`, `vectorize.upsert`, `notion.*`) plus a top-level `bluedot.pipeline.*` span. Every pipeline catch site calls `Sentry.captureException` with `video_id` + `svix_id` tags before returning 500. When adding new pipeline steps, wrap them in `startSpan` and mirror the capture pattern.
 - **Extraction takes `meetingDate`** — `extractFromSummary()` expects the meeting's date so the model can resolve "Friday" / "Monday" into ISO `YYYY-MM-DD` for Notion's `Due` field. Without it, all `due_date`s fall back to natural-language phrases (which still render in the title but don't populate the Date property). Always pass `normalized.createdAt` from new call sites. Ambiguous phrases ("next week", "soon") are preserved verbatim by design.
 
 ## Common Tasks
@@ -36,7 +39,8 @@ Single user (GitHub username allowlist via `ALLOWED_USERS` env). Friends fork to
 | Run tests | `npx vitest run` |
 | Typecheck | `npx tsc --noEmit` |
 | Local dev (Vectorize remote) | `npx wrangler dev` |
-| Deploy | `npx wrangler deploy` |
+| Deploy | `npm run deploy` (wrapper that uploads source maps to Sentry when configured) |
+| Deploy (raw) | `npx wrangler deploy` |
 | Tail logs | `npx wrangler tail` |
 | Generate D1 migration | `npx drizzle-kit generate --name <description>` |
 | Apply D1 migration | `npx wrangler d1 migrations apply bluedot-rag-db --remote` |
@@ -56,6 +60,7 @@ Single user (GitHub username allowlist via `ALLOWED_USERS` env). Friends fork to
 - ❌ Skip the `global_fetch_strictly_public` compat flag — `@cloudflare/workers-oauth-provider` warns at module load and vitest-pool-workers fails without it.
 - ❌ Import `@modelcontextprotocol/sdk` at the top of any non-MCP module path — its transitive `ajv` dep breaks vitest-pool-workers' ESM shim. Keep SDK imports behind the dynamic-import boundary in `src/mcp/handler.ts`.
 - ❌ Add stateful MCP sessions without a plan — the Streamable HTTP transport's stateful mode carries server memory across requests, which doesn't compose with CF Workers' isolate-per-request model unless you persist session state in KV/DO yourself.
+- ❌ Hard-require Sentry — keep the `enabled: Boolean(env.SENTRY_DSN)` guard in `src/index.ts` and the `.sentryclirc` / `SENTRY_AUTH_TOKEN` check in `scripts/deploy.mjs`. Forkers must be able to clone + deploy without a Sentry account.
 
 ## Repo Layout
 
@@ -70,4 +75,4 @@ test/            # vitest setup (D1 migrations + ProvidedEnv typing)
 
 ## Plan-reviewer discipline
 
-When making non-trivial changes, run a plan-reviewer pass before implementing. Track major architectural decisions in commit messages and link back to spec/plan docs in the parent `REDACTED` conductor track if relevant.
+When making non-trivial changes, run a plan-reviewer pass before implementing. Track major architectural decisions in commit messages.

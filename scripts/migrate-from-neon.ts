@@ -1,13 +1,11 @@
 /**
- * One-off migration: copy historical transcripts from the predecessor
- * personal-os Neon database into the new D1 + Vectorize + Notion Followups.
+ * One-off migration: copy historical transcripts from a predecessor Neon
+ * database into the new D1 + Vectorize + Notion Followups.
  *
- * Skips Notion transcript page creation (Bluedot already created those
- * originally, and the user explicitly opted out).
+ * Skips Notion transcript page creation (assumes source already wrote them).
  *
- * Run from /Users/jeremychu/repos/bluedot-rag/:
- *   set -a && source /Users/jeremychu/repos/REDACTED/.env.local && set +a
- *   npx tsx scripts/migrate-from-neon.ts
+ * Run from the repo root with required env vars set:
+ *   DATABASE_URL="postgres://..." OPENAI_API_KEY="sk-..." npx tsx scripts/migrate-from-neon.ts
  */
 import { neon } from "@neondatabase/serverless";
 import OpenAI from "openai";

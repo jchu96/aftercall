@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import * as Sentry from "@sentry/cloudflare";
 import type { Env } from "./env";
 import { verifyBluedotWebhook, WebhookVerificationError } from "./webhook-verify";
 import {
@@ -98,46 +99,56 @@ async function handleTranscriptEvent(
   }
 
   try {
-    const upsert = await upsertFromTranscriptEvent(deps.env.DB, {
-      videoId: normalized.videoId,
-      svixId,
-      title: normalized.title,
-      rawText: normalized.transcriptText,
-      participants: normalized.attendees.map((a) => ({ email: a.email })),
-      language: normalized.language,
-    });
-    log("info", "transcript_event_upserted", {
-      video_id: normalized.videoId,
-      transcript_id: upsert.transcriptId,
-      inserted: upsert.inserted,
-      both_events_present: upsert.bothEventsPresent,
-    });
+    return await Sentry.startSpan(
+      { name: "bluedot.pipeline.transcript", op: "pipeline", attributes: { video_id: normalized.videoId } },
+      async () => {
+        const upsert = await Sentry.startSpan(
+          { name: "bluedot.d1.upsert_transcript", op: "db.write" },
+          () => upsertFromTranscriptEvent(deps.env.DB, {
+            videoId: normalized.videoId,
+            svixId,
+            title: normalized.title,
+            rawText: normalized.transcriptText,
+            participants: normalized.attendees.map((a) => ({ email: a.email })),
+            language: normalized.language,
+          }),
+        );
+        log("info", "transcript_event_upserted", {
+          video_id: normalized.videoId,
+          transcript_id: upsert.transcriptId,
+          inserted: upsert.inserted,
+          both_events_present: upsert.bothEventsPresent,
+        });
 
-    // Embeddings (idempotent via deterministic vector IDs)
-    const chunks = chunkTranscript(normalized.transcriptText, {
-      maxTokens: 500,
-      overlapTokens: 50,
-    });
-    const embedded = await generateEmbeddings(chunks, { client: deps.openai });
-    const vectorChunks: EmbeddedChunk[] = embedded.map((e) => ({
-      transcriptId: upsert.transcriptId,
-      chunkIndex: e.chunkIndex,
-      text: e.text,
-      embedding: e.embedding,
-    }));
-    await upsertChunkEmbeddings(deps.env.VECTORIZE, vectorChunks);
-    log("info", "vectors_upserted", {
-      video_id: normalized.videoId,
-      count: vectorChunks.length,
-    });
+        const chunks = chunkTranscript(normalized.transcriptText, { maxTokens: 500, overlapTokens: 50 });
+        const embedded = await Sentry.startSpan(
+          { name: "bluedot.openai.embed", op: "ai.embeddings", attributes: { chunks: chunks.length } },
+          () => generateEmbeddings(chunks, { client: deps.openai }),
+        );
+        const vectorChunks: EmbeddedChunk[] = embedded.map((e) => ({
+          transcriptId: upsert.transcriptId,
+          chunkIndex: e.chunkIndex,
+          text: e.text,
+          embedding: e.embedding,
+        }));
+        await Sentry.startSpan(
+          { name: "bluedot.vectorize.upsert", op: "db.write", attributes: { count: vectorChunks.length } },
+          () => upsertChunkEmbeddings(deps.env.VECTORIZE, vectorChunks),
+        );
+        log("info", "vectors_upserted", { video_id: normalized.videoId, count: vectorChunks.length });
 
-    // If summary already arrived AND notion not yet synced → do Notion writes now
-    if (upsert.bothEventsPresent && !upsert.alreadyNotionSynced) {
-      await syncToNotion(deps, upsert.transcriptId, normalized.videoId);
-    }
+        if (upsert.bothEventsPresent && !upsert.alreadyNotionSynced) {
+          await syncToNotion(deps, upsert.transcriptId, normalized.videoId);
+        }
 
-    return new Response("OK", { status: 200 });
+        return new Response("OK", { status: 200 });
+      },
+    );
   } catch (err) {
+    Sentry.captureException(err, {
+      tags: { pipeline: "transcript" },
+      extra: { video_id: normalized.videoId, svix_id: svixId },
+    });
     log("error", "pipeline_failed", {
       event: "transcript",
       video_id: normalized.videoId,
@@ -169,56 +180,68 @@ async function handleSummaryEvent(
   }
 
   try {
-    const extracted = await extractFromSummary(
-      {
-        summary: normalized.summaryText,
-        title: normalized.title,
-        attendees: normalized.attendees,
-        meetingDate: normalized.createdAt,
-      },
-      {
-        client: deps.openai,
-        model: deps.env.OPENAI_EXTRACTION_MODEL || DEFAULT_MODEL,
+    return await Sentry.startSpan(
+      { name: "bluedot.pipeline.summary", op: "pipeline", attributes: { video_id: normalized.videoId } },
+      async () => {
+        const extracted = await Sentry.startSpan(
+          { name: "bluedot.openai.extract", op: "ai.chat", attributes: { model: deps.env.OPENAI_EXTRACTION_MODEL || DEFAULT_MODEL } },
+          () => extractFromSummary(
+            {
+              summary: normalized.summaryText,
+              title: normalized.title,
+              attendees: normalized.attendees,
+              meetingDate: normalized.createdAt,
+            },
+            {
+              client: deps.openai,
+              model: deps.env.OPENAI_EXTRACTION_MODEL || DEFAULT_MODEL,
+            },
+          ),
+        );
+        log("info", "extract_ready", {
+          video_id: normalized.videoId,
+          action_items: extracted.action_items.length,
+          participants: extracted.participants.length,
+        });
+
+        const participants =
+          extracted.participants.length > 0
+            ? extracted.participants
+            : normalized.attendees.map((email) => ({ email }));
+
+        const upsert = await Sentry.startSpan(
+          { name: "bluedot.d1.upsert_summary", op: "db.write" },
+          () => upsertFromSummaryEvent(deps.env.DB, {
+            videoId: normalized.videoId,
+            svixId,
+            title: normalized.title,
+            summary: normalized.summaryText,
+            bluedotSummary: normalized.summaryText,
+            participants,
+            actionItems: extracted.action_items,
+          }),
+        );
+        log("info", "summary_event_upserted", {
+          video_id: normalized.videoId,
+          transcript_id: upsert.transcriptId,
+          inserted: upsert.inserted,
+          both_events_present: upsert.bothEventsPresent,
+        });
+
+        if (upsert.bothEventsPresent && !upsert.alreadyNotionSynced) {
+          await syncToNotion(deps, upsert.transcriptId, normalized.videoId);
+        } else if (!upsert.bothEventsPresent) {
+          log("info", "notion_deferred_awaiting_other_event", { video_id: normalized.videoId });
+        }
+
+        return new Response("OK", { status: 200 });
       },
     );
-    log("info", "extract_ready", {
-      video_id: normalized.videoId,
-      action_items: extracted.action_items.length,
-      participants: extracted.participants.length,
-    });
-
-    const participants =
-      extracted.participants.length > 0
-        ? extracted.participants
-        : normalized.attendees.map((email) => ({ email }));
-
-    const upsert = await upsertFromSummaryEvent(deps.env.DB, {
-      videoId: normalized.videoId,
-      svixId,
-      title: normalized.title,
-      summary: normalized.summaryText,
-      bluedotSummary: normalized.summaryText,
-      participants,
-      actionItems: extracted.action_items,
-    });
-    log("info", "summary_event_upserted", {
-      video_id: normalized.videoId,
-      transcript_id: upsert.transcriptId,
-      inserted: upsert.inserted,
-      both_events_present: upsert.bothEventsPresent,
-    });
-
-    // Notion sync if both events landed and not yet synced
-    if (upsert.bothEventsPresent && !upsert.alreadyNotionSynced) {
-      await syncToNotion(deps, upsert.transcriptId, normalized.videoId);
-    } else if (!upsert.bothEventsPresent) {
-      log("info", "notion_deferred_awaiting_other_event", {
-        video_id: normalized.videoId,
-      });
-    }
-
-    return new Response("OK", { status: 200 });
   } catch (err) {
+    Sentry.captureException(err, {
+      tags: { pipeline: "summary" },
+      extra: { video_id: normalized.videoId, svix_id: svixId },
+    });
     log("error", "pipeline_failed", {
       event: "summary",
       video_id: normalized.videoId,
@@ -269,22 +292,29 @@ async function syncToNotion(
 
   let pageId: string | undefined;
   try {
-    const page = await createTranscriptPage(
-      {
-        dataSourceId: deps.env.NOTION_TRANSCRIPTS_DATA_SOURCE_ID,
-        title: row.title,
-        summary: row.summary,
-        participants,
-        actionItems,
-        videoId,
-        language: row.language,
-        createdAt: new Date(row.created_at + "Z"),
-      },
-      deps.notion,
+    const page = await Sentry.startSpan(
+      { name: "bluedot.notion.create_transcript_page", op: "http.client" },
+      () => createTranscriptPage(
+        {
+          dataSourceId: deps.env.NOTION_TRANSCRIPTS_DATA_SOURCE_ID,
+          title: row.title,
+          summary: row.summary,
+          participants,
+          actionItems,
+          videoId,
+          language: row.language,
+          createdAt: new Date(row.created_at + "Z"),
+        },
+        deps.notion,
+      ),
     );
     pageId = page.pageId;
     log("info", "transcript_page_created", { transcript_id: transcriptId, page_id: pageId });
   } catch (err) {
+    Sentry.captureException(err, {
+      tags: { notion: "transcript_page" },
+      extra: { transcript_id: transcriptId, video_id: videoId },
+    });
     log("error", "transcript_page_failed", {
       transcript_id: transcriptId,
       error: err instanceof Error ? err.message : String(err),
@@ -294,20 +324,27 @@ async function syncToNotion(
   let followupsCreated = 0;
   for (const item of actionItems) {
     try {
-      await createFollowupRow(
-        {
-          dataSourceId: deps.env.NOTION_FOLLOWUPS_DATA_SOURCE_ID,
-          task: item.task,
-          owner: item.owner,
-          due_date: item.due_date,
-          meetingTitle: row.title,
-          meetingUrl,
-          videoId,
-        },
-        deps.notion,
+      await Sentry.startSpan(
+        { name: "bluedot.notion.create_followup", op: "http.client" },
+        () => createFollowupRow(
+          {
+            dataSourceId: deps.env.NOTION_FOLLOWUPS_DATA_SOURCE_ID,
+            task: item.task,
+            owner: item.owner,
+            due_date: item.due_date,
+            meetingTitle: row.title,
+            meetingUrl,
+            videoId,
+          },
+          deps.notion,
+        ),
       );
       followupsCreated++;
     } catch (err) {
+      Sentry.captureException(err, {
+        tags: { notion: "followup" },
+        extra: { transcript_id: transcriptId, task: item.task, video_id: videoId },
+      });
       log("error", "followup_failed", {
         transcript_id: transcriptId,
         task: item.task,

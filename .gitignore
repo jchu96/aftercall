@@ -7,3 +7,6 @@ dist/
 .env.local
 .DS_Store
 *.log
+
+# Sentry Config File
+.sentryclirc

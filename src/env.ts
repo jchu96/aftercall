@@ -24,4 +24,9 @@ export interface Env {
   NOTION_FOLLOWUPS_DATA_SOURCE_ID: string;
   ALLOWED_USERS: string;
   BASE_URL: string;
+
+  // Sentry (DSN is a secret via wrangler secret put; SENTRY_RELEASE injected at deploy time)
+  SENTRY_DSN?: string;
+  SENTRY_ENVIRONMENT?: string;
+  SENTRY_RELEASE?: string;
 }

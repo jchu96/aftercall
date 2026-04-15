@@ -204,6 +204,7 @@ Set via `wrangler.toml` `[vars]` for non-secret config and `wrangler secret put`
 | `BLUEDOT_WEBHOOK_SECRET` | yes | Svix signing secret from Bluedot's webhook config |
 | `GITHUB_CLIENT_ID` | MCP only | GitHub OAuth App client id |
 | `GITHUB_CLIENT_SECRET` | MCP only | GitHub OAuth App client secret |
+| `SENTRY_DSN` | optional | Enables error tracking + pipeline tracing. Leave unset to disable Sentry entirely. |
 
 ### Vars (`wrangler.toml`)
 
@@ -214,6 +215,8 @@ Set via `wrangler.toml` `[vars]` for non-secret config and `wrangler secret put`
 | `NOTION_FOLLOWUPS_DATA_SOURCE_ID` | — | Set by setup script |
 | `BASE_URL` | — | Public worker origin; used for OAuth callback URL construction |
 | `ALLOWED_USERS` | — | Comma-separated GitHub usernames allowed via MCP |
+| `SENTRY_ENVIRONMENT` | `production` | Only read when `SENTRY_DSN` is set |
+| `SENTRY_RELEASE` | auto | Injected by `npm run deploy` when Sentry is configured |
 
 ### Bindings
 
@@ -284,6 +287,32 @@ test/                         # vitest helpers + ProvidedEnv typing
 
 ---
 
+## Observability (optional)
+
+The Worker ships with [`@sentry/cloudflare`](https://docs.sentry.io/platforms/javascript/guides/cloudflare/) integration for error tracking + pipeline performance tracing. It's **fully optional** — leave `SENTRY_DSN` unset and the SDK is a no-op.
+
+**Enable it** (your own fork, your own Sentry project):
+
+```bash
+# 1. Add DSN as a secret
+npx wrangler secret put SENTRY_DSN
+
+# 2. (optional) enable source map uploads on deploy
+#    - export SENTRY_AUTH_TOKEN from https://sentry.io/settings/account/api/auth-tokens/
+#    - override defaults in scripts/deploy.mjs (SENTRY_ORG, SENTRY_PROJECT envs)
+SENTRY_ORG=my-org SENTRY_PROJECT=my-project SENTRY_AUTH_TOKEN=sntrys_... npm run deploy
+```
+
+What's instrumented:
+- **Pipeline spans** — `bluedot.pipeline.{transcript,summary}` wrap the webhook handlers, with child spans for `openai.extract`, `openai.embed`, `d1.upsert_*`, `vectorize.upsert`, `notion.create_transcript_page`, `notion.create_followup`.
+- **Error capture** — every pipeline catch site calls `Sentry.captureException` with `video_id` + `svix_id` tags. Notion failures are non-fatal but still reported.
+- **MCP + OAuth errors** — `withSentry` wraps the worker entrypoint so any uncaught error in the OAuth or MCP paths auto-reports.
+- **Source maps** — `npm run deploy` uploads them to Sentry automatically when `.sentryclirc` or `SENTRY_AUTH_TOKEN` is present; otherwise the step is skipped with a warning.
+
+Without Sentry configured, `npm run deploy` just runs `wrangler deploy` as before.
+
+---
+
 ## Documentation
 
 | Doc | Read when |
@@ -300,8 +329,3 @@ test/                         # vitest helpers + ProvidedEnv typing
 
 MIT — see [LICENSE](./LICENSE).
 
----
-
-## Predecessor
-
-This Worker evolved from a Neon-backed prototype. See [REDACTED/docs/bluedot-pipeline.md](https://github.com/jchu96/REDACTED/blob/main/docs/bluedot-pipeline.md) for that earlier architecture.

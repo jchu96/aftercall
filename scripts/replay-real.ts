@@ -23,7 +23,7 @@ const transcriptPayload = {
   title: "Replay test — Founder role evolution",
   createdAt: 1741088306,
   duration: 53.6,
-  attendees: ["jeremy_chu@gojobengine.com"],
+  attendees: ["test@example.com"],
   language: "en",
   transcript: [
     { speaker: "Speaker: A", text: "How has your job role changed from being a team of about four to being a team of over 20 now in the last few years?" },
@@ -43,7 +43,7 @@ const summaryPayload = {
   videoId: transcriptPayload.videoId,
   title: transcriptPayload.title,
   createdAt: 1741087081,
-  attendees: ["jeremy_chu@gojobengine.com"],
+  attendees: ["test@example.com"],
   summary:
     "The discussion focuses on the evolution of a founder's role as their company grows from a small team to a larger organization. The speaker describes their transition from handling all aspects of the business initially to becoming more of a 'head coach' for a team of over 20 people. The founder's primary objective is to become 'obsolete' by empowering their team to perform at their best.\n\nAction Items:\n- Jeremy to draft updated job description for 'head coach' role\n- Andy to share leadership philosophy doc by Friday",
   summaryV2:

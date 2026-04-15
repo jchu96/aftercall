@@ -1,3 +1,7 @@
 OPENAI_API_KEY="sk-proj-..."
 NOTION_INTEGRATION_KEY="ntn_..."
 BLUEDOT_WEBHOOK_SECRET="whsec_..."
+
+# Optional — error tracking + performance. Leave unset to disable Sentry entirely.
+# SENTRY_DSN="https://<key>@<org>.ingest.sentry.io/<project>"
+# SENTRY_ENVIRONMENT="development"

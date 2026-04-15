@@ -2,6 +2,32 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-04-15
+
+**Sentry error tracking + pipeline performance tracing.** Fully optional — leave `SENTRY_DSN` unset and the SDK is a no-op so forkers without a Sentry account can still clone and deploy.
+
+### Added
+
+- `@sentry/cloudflare` integration wrapping the worker entrypoint. Runtime captures uncaught errors from OAuth, MCP, and webhook paths automatically.
+- Pipeline tracing in `src/handler.ts` — top-level `bluedot.pipeline.{transcript,summary}` spans with child spans for `openai.extract`, `openai.embed`, `d1.upsert_*`, `vectorize.upsert`, `notion.create_transcript_page`, `notion.create_followup`.
+- `Sentry.captureException` at every pipeline catch site with `video_id` + `svix_id` tags (non-fatal Notion failures still report).
+- `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE` on the `Env` interface (all optional).
+- `scripts/deploy.mjs` — deploy wrapper that uploads source maps to Sentry when `.sentryclirc` or `SENTRY_AUTH_TOKEN` is present, and skips gracefully otherwise.
+- `SENTRY_ORG` + `SENTRY_PROJECT` env vars to override the Sentry project target.
+- README "Observability (optional)" section + `SENTRY_*` rows in env/vars reference.
+
+### Changed
+
+- `openai` upgraded `^4.77.0` → `^6.34.0` to resolve the `zod@^4` peer conflict with `@modelcontextprotocol/sdk`. No source changes required — `chat.completions.create` and `embeddings.create` APIs are stable across the jump.
+- `src/index.ts` now wraps the OAuth-provider worker in `Sentry.withSentry` with `enabled: Boolean(env.SENTRY_DSN)` so the SDK is inert without a DSN.
+- `npm run deploy` now runs `scripts/deploy.mjs` (wraps `wrangler deploy --outdir dist --upload-source-maps` plus optional Sentry release tagging + sourcemap upload).
+
+### Notes
+
+- Git history was rewritten in this release to replace the previous commit author email with the GitHub noreply address, and to strip references to an unrelated predecessor project. Commit SHAs prior to `0.3.0` no longer match what was published during `0.2.0`.
+
+---
+
 ## [0.2.0] — 2026-04-15
 
 **MCP server with GitHub OAuth.** Indexed calls are now queryable from Claude.ai over the Model Context Protocol.
