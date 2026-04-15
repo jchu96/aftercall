@@ -143,6 +143,62 @@ async function readTomlVars(): Promise<Record<string, string>> {
   return out;
 }
 
+/**
+ * Best-effort inference of the deployed Worker URL so step 8 can show a
+ * concrete URL when telling the user what to put in the GitHub OAuth App.
+ *
+ * Tries, in order:
+ *   1. BASE_URL already set in wrangler.toml (reruns, or anyone who set it manually)
+ *   2. Cloudflare API — read wrangler's stored OAuth token + call
+ *      /accounts/{id}/workers/subdomain to derive `<subdomain>.workers.dev`
+ *
+ * Returns null if neither works; the caller falls back to a placeholder.
+ */
+async function inferWorkerUrl(): Promise<string | null> {
+  // 1. Existing BASE_URL in wrangler.toml
+  const toml = await readTomlVars();
+  if (toml.BASE_URL) return toml.BASE_URL;
+
+  // 2. CF API — needs account id + oauth token
+  const whoami = runCli("npx", ["wrangler", "whoami"]);
+  if (whoami.status !== 0) return null;
+  const accountIdMatch = whoami.stdout.match(/\b([0-9a-f]{32})\b/);
+  if (!accountIdMatch) return null;
+  const accountId = accountIdMatch[1];
+
+  const candidates = [
+    `${process.env.HOME}/Library/Preferences/.wrangler/config/default.toml`,
+    `${process.env.HOME}/.config/.wrangler/config/default.toml`,
+    `${process.env.HOME}/.wrangler/config/default.toml`,
+  ];
+  let oauthToken: string | undefined;
+  for (const path of candidates) {
+    if (!existsSync(path)) continue;
+    try {
+      const cfg = await readFile(path, "utf8");
+      const m = cfg.match(/oauth_token\s*=\s*"([^"]+)"/);
+      if (m) { oauthToken = m[1]; break; }
+    } catch {
+      // try next path
+    }
+  }
+  if (!oauthToken) return null;
+
+  try {
+    const resp = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/subdomain`,
+      { headers: { Authorization: `Bearer ${oauthToken}` } },
+    );
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as { result?: { subdomain?: string } };
+    const sub = data.result?.subdomain;
+    if (!sub) return null;
+    return `https://bluedot-rag.${sub}.workers.dev`;
+  } catch {
+    return null;
+  }
+}
+
 async function step1_checkWranglerAuth(): Promise<void> {
   header("[1/10] Checking wrangler authentication");
   const r = runCli("npx", ["wrangler", "whoami"]);
@@ -531,18 +587,27 @@ async function step8_setupMcpOAuth(
   // GitHub OAuth app walkthrough
   const hasExistingCreds = !!(existing.githubClientId && existing.githubClientSecret);
   if (!hasExistingCreds) {
+    const inferredUrl = await inferWorkerUrl();
+    const homepageExample = inferredUrl
+      ? `\x1b[1m${inferredUrl}\x1b[0m`
+      : "`https://bluedot-rag.<account>.workers.dev`";
+    const callbackExample = inferredUrl
+      ? `\x1b[1m${inferredUrl}/auth/github/callback\x1b[0m`
+      : "the same worker URL + `/auth/github/callback`";
+
     console.log("");
     console.log("  You'll need a GitHub OAuth App. If you don't have one:");
     console.log("    1. Go to https://github.com/settings/developers");
     console.log("    2. Click \"New OAuth App\"");
     console.log("    3. Application name: something like `bluedot-rag MCP`");
-    console.log(
-      "    4. Homepage URL: your worker URL (e.g. `https://bluedot-rag.<account>.workers.dev`)",
-    );
-    console.log(
-      "    5. Authorization callback URL: the same worker URL + `/auth/github/callback`",
-    );
+    console.log(`    4. Homepage URL: ${homepageExample}`);
+    console.log(`    5. Authorization callback URL: ${callbackExample}`);
     console.log("    6. Generate a client secret and copy both values.");
+    if (inferredUrl) {
+      info(
+        `(URL auto-detected from your Cloudflare account — overwrite later if you use a custom domain.)`,
+      );
+    }
     console.log("");
 
     const openAns = (
