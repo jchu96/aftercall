@@ -34,6 +34,7 @@ export interface NormalizedBluedotEvent {
   attendees: Array<{ email?: string; name?: string }>;
   language?: string;
   createdAt?: Date;
+  meetingUrl?: string;
 }
 
 /**
@@ -60,13 +61,25 @@ export function normalizeTranscriptEvent(payload: BluedotWebhookPayload): Normal
     throw new Error("Bluedot transcript event missing transcript[] array");
   }
 
+  // meetingId is sometimes a URL ("https://meet.google.com/..."), sometimes a
+  // path ("meet.google.com/..."), sometimes an opaque id. Detect URLs and
+  // surface them so we can link back to the meeting from Followup tasks.
+  const rawMeetingId = payload.meetingId || payload.videoId;
+  let meetingUrl: string | undefined;
+  if (rawMeetingId.startsWith("http://") || rawMeetingId.startsWith("https://")) {
+    meetingUrl = rawMeetingId;
+  } else if (rawMeetingId.includes("meet.google.com/") || rawMeetingId.includes("zoom.us/")) {
+    meetingUrl = `https://${rawMeetingId}`;
+  }
+
   return {
-    videoId: payload.meetingId || payload.videoId,
+    videoId: rawMeetingId,
     title: payload.title || "Untitled meeting",
     transcriptText: flattenTranscript(payload.transcript),
     attendees: (payload.attendees ?? []).map((email) => ({ email })),
     language: payload.language,
     createdAt: payload.createdAt ? new Date(payload.createdAt * 1000) : undefined,
+    meetingUrl,
   };
 }
 
