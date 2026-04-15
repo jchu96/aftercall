@@ -9,7 +9,7 @@ export default defineWorkersConfig({
           d1Databases: ["DB"],
           kvNamespaces: ["OAUTH_KV"],
           compatibilityDate: "2024-12-30",
-          compatibilityFlags: ["nodejs_compat"],
+          compatibilityFlags: ["nodejs_compat", "global_fetch_strictly_public"],
           bindings: {
             OPENAI_API_KEY: "sk-test-openai",
             NOTION_INTEGRATION_KEY: "ntn_test",

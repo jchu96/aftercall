@@ -1,8 +1,2 @@
-import type { Env } from "./env";
-import { handleWebhook, buildHandlerDeps } from "./handler";
-
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    return handleWebhook(request, buildHandlerDeps(env));
-  },
-};
+// Worker entry: OAuth-wrapped MCP + Bluedot webhook. Actual wiring in ./mcp/index.ts.
+export { default } from "./mcp/index";

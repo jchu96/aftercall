@@ -10,6 +10,7 @@
  */
 import { Hono } from "hono";
 import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
+import type { Env } from "../../env";
 import { isAllowed } from "./allowlist";
 
 type Bindings = Env & { OAUTH_PROVIDER: OAuthHelpers };
