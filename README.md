@@ -1,6 +1,12 @@
 # aftercall
 
-> Your meetings, indexed and queryable from Claude.ai. One Cloudflare Worker turns every Bluedot call into a searchable vector store, a triageable Notion inbox, and an MCP server you can ask questions in natural language.
+> Search and ask questions about your meetings using AI.
+>
+> After a video call, aftercall automatically saves the summary, the full transcript, and any action items. Then you can ask Claude things like _"What did I agree to do for Sarah?"_ or _"What meetings mentioned the budget?"_ — and get real answers back.
+>
+> Every to-do from your calls drops into a Notion checklist so nothing falls through the cracks.
+>
+> **Ongoing cost:** ~$5/mo for hosting + a fraction of a cent per call for AI processing. Needs a Bluedot account (free trial) to record your calls.
 
 ```
  Bluedot call ──▶ Worker ──▶ D1 + Vectorize + Notion ──▶ Claude.ai (MCP)
@@ -322,6 +328,7 @@ Without Sentry configured, `npm run deploy` just runs `wrangler deploy` as befor
 | [`docs/auth.md`](./docs/auth.md) | First-time OAuth setup, troubleshooting 401/403/redirect_uri errors |
 | [`CHANGELOG.md`](./CHANGELOG.md) | What changed between versions |
 | [`CLAUDE.md`](./CLAUDE.md) | Conventions + do-nots when using Claude Code in this repo |
+| [`conductor/`](./conductor/) | Product definition, tech stack, workflow, and track specs — the "why" behind the code |
 
 ---
 

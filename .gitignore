@@ -14,3 +14,7 @@ wrangler.toml
 
 # Sentry Config File
 .sentryclirc
+
+# Conductor working state (decision artifacts are committed; state is not)
+conductor/setup_state.json
+conductor/**/*_state.json
