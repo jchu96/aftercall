@@ -6,13 +6,13 @@ Tracks are the logical unit of work in aftercall. Each track has a spec (why + w
 
 | Status | Track ID | Title | Created | Updated |
 | ------ | -------- | ----- | ------- | ------- |
-| 🟢 active | [notion-redesign-and-rag-tool](./tracks/notion-redesign-and-rag-tool/) | Slim Transcripts schema + add `answer_from_transcript` MCP tool | 2026-04-16 | 2026-04-16 |
+| _none_ | | | | |
 
 ## Completed
 
 | Status | Track ID | Title | Created | Completed |
 | ------ | -------- | ----- | ------- | --------- |
-| _none yet_ | | | | |
+| ✅ done | [notion-redesign-and-rag-tool](./tracks/notion-redesign-and-rag-tool/) | Slim Transcripts schema + add `answer_from_transcript` MCP tool | 2026-04-16 | 2026-04-16 |
 
 ---
 
