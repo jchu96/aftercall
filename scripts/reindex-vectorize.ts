@@ -142,7 +142,12 @@ async function reindexOne(row: TranscriptRow): Promise<number> {
 
   // Tail-delete stale vectors from a previously-larger chunking (no-op if none).
   const staleIds = tailDeleteIds(row.id, vectors.length, TAIL_DELETE_PAD);
-  runCli("npx", ["wrangler", "vectorize", "delete-vectors", VECTORIZE_NAME, "--ids", ...staleIds]);
+  const del = runCli("npx", ["wrangler", "vectorize", "delete-vectors", VECTORIZE_NAME, "--ids", ...staleIds]);
+  if (del.status !== 0) {
+    // Non-fatal: surplus old vectors may linger, but the live set is correct.
+    // Surface it so it's not silently masked by the metadata version bump below.
+    console.warn(`  ⚠ tail-delete failed for transcript ${row.id} (stale vectors may remain):`, del.stdout.trim());
+  }
 
   // Backfill identifier + chunk metadata in D1 (folds in the meeting_code backfill).
   const code = resolveMeetingCode(row.video_id);

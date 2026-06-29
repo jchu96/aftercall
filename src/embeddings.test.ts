@@ -137,6 +137,36 @@ describe("chunkTranscript — turn-aware (speaker-labeled transcripts)", () => {
     expect(chunks[0].text).not.toMatch(/here's the deal:\s*$/m);
   });
 
+  it("keeps every chunk within maxChars even in overlap mode (no 2× overflow)", () => {
+    const turns: string[] = [];
+    for (let i = 0; i < 20; i++) {
+      turns.push(`Speaker ${i % 2}: ${"x".repeat(55)}`); // ~65-char turns, near the budget
+    }
+    const maxTokens = 25; // maxChars = 100
+    const chunks = chunkTranscript(turns.join("\n"), { maxTokens, overlapTokens: 10 });
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const c of chunks) {
+      expect(c.text.length).toBeLessThanOrEqual(maxTokens * 4);
+    }
+  });
+
+  it("attributes non-Latin-script speaker names (e.g. CJK) even without a roster", () => {
+    const text = "Alice: hello everyone\n李明: 大家好 and then some more words here";
+    const chunks = chunkTranscript(text, { maxTokens: 500 }); // no `speakers` roster
+    expect(chunks[0].text).toMatch(/^李明: /m); // 李明 starts its own turn line
+    expect((chunks[0].text.match(/李明:/g) ?? []).length).toBe(1);
+  });
+
+  it("parses speaker turns identically whether lines are \\n or \\r\\n separated", () => {
+    const lines = ["Jeremy Chu: First thing.", "Andy Pilipović: Second thing.", "Jeremy Chu: Third."];
+    const lf = chunkTranscript(lines.join("\n"), { maxTokens: 500 });
+    const crlf = chunkTranscript(lines.join("\r\n"), { maxTokens: 500 });
+    expect(crlf[0].text).toBe(lf[0].text);
+    // No stray carriage returns leak into the rendered turns.
+    expect(crlf[0].text).not.toContain("\r");
+    expect((crlf[0].text.match(/Jeremy Chu:/g) ?? []).length).toBe(2);
+  });
+
   it("applies 1-turn overlap when overlapTokens > 0 (boundary turn repeated, still labeled)", () => {
     const turns: string[] = [];
     for (let i = 0; i < 30; i++) {

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f7a90380-1584-486b-ac2c-33adaf1629e3",
+  "id": "5f540b81-f3c0-4de1-acd9-2904cbfddf77",
   "prevId": "e7b6a16e-7955-4070-8555-ce06d2eef782",
   "tables": {
     "transcripts": {
@@ -130,6 +130,13 @@
             "video_id"
           ],
           "isUnique": true
+        },
+        "idx_transcripts_meeting_code": {
+          "name": "idx_transcripts_meeting_code",
+          "columns": [
+            "meeting_code"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {},

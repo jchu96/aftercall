@@ -131,7 +131,7 @@ export async function answerFromTranscript(
     // Vectorize is eventually consistent; fall back to the raw transcript in D1
     // when the index hasn't caught up. Pick question-relevant, speaker-labeled
     // turns rather than blindly truncating the first N chars.
-    if (row.raw_text && row.raw_text.length > 0) {
+    if (row.raw_text && row.raw_text.trim().length > 0) {
       excerpts = selectFallbackExcerpts(row.raw_text, input.question, RAW_TEXT_FALLBACK_MAX);
     } else {
       return {

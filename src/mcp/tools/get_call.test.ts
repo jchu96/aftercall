@@ -59,6 +59,21 @@ describe("getCall", () => {
     expect(out.content[0].text).toContain("Schemeless call");
   });
 
+  it("returns a disambiguation list when two rows share a meeting_code (recurring meeting)", async () => {
+    // Recurring Google Meet reuses the same code each week → two rows, one code.
+    await env.DB.prepare(
+      `INSERT INTO transcripts (video_id, title, meeting_code, summary, participants, action_items)
+       VALUES ('wk1','Weekly standup (wk1)','www-jjni-xtd','s','[]','[]'),
+              ('wk2','Weekly standup (wk2)','www-jjni-xtd','s','[]','[]')`,
+    ).run();
+
+    const out = await getCall({ video_id: "https://meet.google.com/www-jjni-xtd" }, env);
+    const text = out.content[0].text;
+    expect(text).toContain("wk1");
+    expect(text).toContain("wk2");
+    expect(text.toLowerCase()).toMatch(/multiple|pick|which/);
+  });
+
   it("returns a disambiguation list (not a guessed row) when a fuzzy query matches multiple", async () => {
     await env.DB.prepare(
       `INSERT INTO transcripts (video_id, title, meeting_code, summary, participants, action_items)

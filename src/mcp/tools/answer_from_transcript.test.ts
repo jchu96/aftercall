@@ -179,6 +179,21 @@ describe("answerFromTranscript", () => {
     expect(sysMsg).toMatch(/speaker/i);
   });
 
+  it("does not throw when raw_text is whitespace-only and vectorize is cold", async () => {
+    await seedTranscript({ id: 12, videoId: "vid_12", rawText: "\n\n   \n" });
+    const { client, create } = fakeOpenAI("unused");
+    const vectorize = fakeVectorize([]);
+
+    const out = await answerFromTranscript(
+      { video_id: "vid_12", question: "q" },
+      env,
+      { openai: client, vectorize },
+    );
+
+    expect(create).not.toHaveBeenCalled();
+    expect(out.content[0].text.toLowerCase()).toContain("not yet indexed");
+  });
+
   it("returns a not-yet-indexed message when vectorize returns nothing AND raw_text is empty", async () => {
     await seedTranscript({ id: 11, videoId: "vid_11", rawText: "" });
     const { client, create } = fakeOpenAI("should not be called");

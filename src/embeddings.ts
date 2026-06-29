@@ -55,7 +55,10 @@ function parseSpeakerLine(line: string, known?: Set<string>): Turn | null {
   const words = speaker.split(/\s+/);
   if (words.length > 5) return null;
   for (const w of words) {
-    if (!/^[\p{Lu}\p{N}]/u.test(w)) return null;
+    // Each word must start with an uppercase letter, an uncased-script letter
+    // (CJK/Thai/Hebrew/etc. — \p{Lo}), or a digit. Lowercase Latin (\p{Ll})
+    // stays rejected so mid-utterance prose ("here's the deal:") isn't a header.
+    if (!/^[\p{Lu}\p{Lo}\p{N}]/u.test(w)) return null;
   }
   return { speaker, text };
 }
@@ -130,6 +133,11 @@ export function chunkTranscript(
     throw new Error("chunkTranscript: input is empty");
   }
 
+  // Normalize line endings so CRLF (\r\n) / lone-CR transcripts parse the same
+  // as LF — a trailing \r otherwise defeats the speaker-line regex and collapses
+  // the whole call into one mis-attributed turn.
+  text = text.replace(/\r\n?/g, "\n");
+
   const maxChars = options.maxTokens * CHARS_PER_TOKEN;
   const overlapChars = (options.overlapTokens ?? 0) * CHARS_PER_TOKEN;
 
@@ -171,7 +179,9 @@ export function chunkTranscript(
     if (current.length > 0 && currentLen + rendered.length + 1 > maxChars) {
       const prevLast = current[current.length - 1];
       flush();
-      if (overlapChars > 0) {
+      // Seed the next chunk with the boundary turn for overlap — but only when
+      // it still leaves room for `rendered`, else the chunk would exceed budget.
+      if (overlapChars > 0 && prevLast.length + rendered.length + 2 <= maxChars) {
         current = [prevLast];
         currentLen = prevLast.length + 1;
       } else {
