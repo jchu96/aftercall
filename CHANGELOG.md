@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] — 2026-06-29
 
 **Call lookup by identifier + speaker-aware RAG.** Fixes two retrieval gaps: you couldn't find a call by pasting its Meet URL (only semantic search existed, and it returns noise for identifiers), and chunk boundaries orphaned speaker labels so per-call Q&A misattributed who said what.
 
