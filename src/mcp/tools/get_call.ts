@@ -1,6 +1,7 @@
 import type { Env } from "../../env";
 import type { ActionItem, Participant } from "../../schema";
 import type { ToolResult } from "./recent_calls";
+import { resolveTranscript, formatCandidates } from "../resolve";
 
 export interface GetCallInput {
   video_id: string;
@@ -28,11 +29,38 @@ function safeParseArray<T>(json: string | null | undefined): T[] {
 }
 
 export async function getCall(input: GetCallInput, env: Env): Promise<ToolResult> {
+  // Exact → normalized (meeting_code) → fuzzy (title/participant) chain.
+  const resolved = await resolveTranscript(input.video_id, env);
+
+  if (resolved.kind === "miss") {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Call not found: ${input.video_id} (tried exact id, meeting code, and title/participant search).`,
+        },
+      ],
+    };
+  }
+
+  if (resolved.kind === "ambiguous") {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Multiple calls match "${input.video_id}" — pick one and call get_call with its exact \`video_id\`:\n\n${formatCandidates(
+            resolved.rows,
+          )}`,
+        },
+      ],
+    };
+  }
+
   const row = await env.DB.prepare(
     `SELECT id, video_id, title, summary, bluedot_summary, participants, action_items, created_at
-     FROM transcripts WHERE video_id = ?1 LIMIT 1`,
+     FROM transcripts WHERE id = ?1 LIMIT 1`,
   )
-    .bind(input.video_id)
+    .bind(resolved.row.id)
     .first<Row>();
 
   if (!row) {

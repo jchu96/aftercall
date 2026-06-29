@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+**Call lookup by identifier + speaker-aware RAG.** Fixes two retrieval gaps: you couldn't find a call by pasting its Meet URL (only semantic search existed, and it returns noise for identifiers), and chunk boundaries orphaned speaker labels so per-call Q&A misattributed who said what.
+
+### Added
+
+- **`find_call(query, limit?)` MCP tool** — structured/lexical call lookup (the counterpart to semantic `search_calls`). Resolves a Meet/Zoom URL, bare meeting code, hex id, title fragment, or participant name to a call, ranked exact-identifier-first. No embeddings.
+- **`meeting_code` column** (indexed, nullable) derived from `video_id` via the new pure `resolveMeetingCode()` (`src/identity.ts`). A pasted `https://meet.google.com/x`, schemeless `meet.google.com/x`, and bare `x` all collapse to the same code, so lookups stop depending on the stored format. `video_id` stays verbatim (still the `UNIQUE` idempotency key).
+- **Shared `resolveTranscript()` resolver** (`src/mcp/resolve.ts`) — exact → normalized → fuzzy chain with disambiguation, used by `get_call`, `find_call`, and `answer_from_transcript`.
+- **Embedding provider seam** (`src/embed.ts`) — single `embedQuery()` for query-time embeddings, so swapping providers (e.g. Gemini `gemini-embedding-001` @1536d) is localized to one module.
+- `chunk_count` + `chunk_schema_version` columns + `tailDeleteIds()` helper for resumable re-indexing.
+
+### Changed
+
+- **Turn-aware chunking.** `chunkTranscript` now packs whole `Speaker: utterance` turns (never splitting mid-turn), merges consecutive same-speaker fragments, and re-labels oversized-turn splits with `(continued)` — so every chunk carries speaker attribution. Plain (non-transcript) text falls back to the legacy sentence-based splitter. Bumped `CHUNK_SCHEMA_VERSION` to 2.
+- `answer_from_transcript` — speaker-attribution system prompt; cold-Vectorize fallback now selects question-relevant turns instead of truncating the first 24k chars; resolves flexible identifier forms.
+- `get_call` hardened to normalize + fuzzy-resolve and disambiguate; `search_calls`/`get_call`/`find_call` descriptions rewritten so the model routes identifiers → `find_call`, topics → `search_calls`.
+- `scripts/reindex-vectorize.ts` re-embeds with the speaker-aware chunker (passing participant names), tail-deletes stale vectors, and backfills `meeting_code` + chunk metadata. `--stale-only` skips already-v2 rows. **Run once after deploy** to re-index existing calls.
+- MCP tool count: **6 → 7**.
+
 ## [0.5.0] — 2026-04-16
 
 **Notion redesign + per-call RAG tool.** aftercall's Notion Transcripts DB stops duplicating Bluedot's native summary pages and becomes a structured metadata hub. New `answer_from_transcript` MCP tool for drilling into a specific call.

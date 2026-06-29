@@ -1,4 +1,5 @@
 import type { ActionItem, Participant } from "./schema";
+import { resolveMeetingCode } from "./identity";
 
 export interface TranscriptEventInput {
   videoId: string;
@@ -70,8 +71,8 @@ export async function upsertFromTranscriptEvent(
   // Try insert first (most common case)
   const inserted = await db
     .prepare(
-      `INSERT INTO transcripts (video_id, title, raw_text, language, participants, svix_id)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+      `INSERT INTO transcripts (video_id, title, raw_text, language, participants, svix_id, meeting_code)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
        ON CONFLICT (video_id) DO NOTHING
        RETURNING id`,
     )
@@ -82,6 +83,7 @@ export async function upsertFromTranscriptEvent(
       input.language ?? null,
       JSON.stringify(input.participants),
       input.svixId,
+      resolveMeetingCode(input.videoId),
     )
     .first<{ id: number } | null>();
 
@@ -146,8 +148,8 @@ export async function upsertFromSummaryEvent(
   const inserted = await db
     .prepare(
       `INSERT INTO transcripts
-         (video_id, title, summary, bluedot_summary, participants, action_items, svix_id)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         (video_id, title, summary, bluedot_summary, participants, action_items, svix_id, meeting_code)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
        ON CONFLICT (video_id) DO NOTHING
        RETURNING id`,
     )
@@ -159,6 +161,7 @@ export async function upsertFromSummaryEvent(
       JSON.stringify(input.participants),
       JSON.stringify(input.actionItems),
       input.svixId,
+      resolveMeetingCode(input.videoId),
     )
     .first<{ id: number } | null>();
 

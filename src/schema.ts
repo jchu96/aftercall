@@ -9,7 +9,7 @@
  * if we ever need to query into them.
  */
 
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 export interface ActionItem {
@@ -53,10 +53,27 @@ export const transcripts = sqliteTable("transcripts", {
   svixId: text("svix_id"),
   notionPageId: text("notion_page_id"),
   notionSyncedAt: text("notion_synced_at"),
+  /**
+   * Canonical, normalized meeting identifier derived from `video_id` via
+   * `deriveMeetingCode()`. Indexed (non-unique — Zoom numeric ids can repeat;
+   * the resolver disambiguates downstream). Lets a pasted Meet URL, a
+   * schemeless path, and a bare code all resolve the same row regardless of
+   * how Bluedot happened to store `video_id`.
+   */
+  meetingCode: text("meeting_code"),
+  /** Number of chunks embedded into Vectorize for this transcript. */
+  chunkCount: integer("chunk_count"),
+  /**
+   * Chunking algorithm version. v2 = turn-aware (speaker-labeled) chunks.
+   * Rows below the current version are swept by `scripts/reindex-transcripts.ts`.
+   */
+  chunkSchemaVersion: integer("chunk_schema_version"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),
-});
+}, (table) => [
+  index("idx_transcripts_meeting_code").on(table.meetingCode),
+]);
 
 export type Transcript = typeof transcripts.$inferSelect;
 export type NewTranscript = typeof transcripts.$inferInsert;

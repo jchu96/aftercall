@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { upsertChunkEmbeddings, vectorIdFor, type EmbeddedChunk } from "./vectorize";
+import { upsertChunkEmbeddings, vectorIdFor, tailDeleteIds, type EmbeddedChunk } from "./vectorize";
 
 function makeEmbedded(transcriptId: number, count: number): EmbeddedChunk[] {
   return Array.from({ length: count }, (_, i) => ({
@@ -22,6 +22,18 @@ describe("vectorIdFor", () => {
   it("produces deterministic ids", () => {
     expect(vectorIdFor(42, 0)).toBe("42-0");
     expect(vectorIdFor(42, 7)).toBe("42-7");
+  });
+});
+
+describe("tailDeleteIds", () => {
+  it("returns the overshoot range starting at the new chunk count", () => {
+    const ids = tailDeleteIds(42, 2, 64);
+    expect(ids).toHaveLength(64);
+    expect(ids[0]).toBe("42-2");
+    expect(ids.at(-1)).toBe("42-65");
+    // Never deletes a surviving vector (indices < newChunkCount).
+    expect(ids).not.toContain("42-0");
+    expect(ids).not.toContain("42-1");
   });
 });
 

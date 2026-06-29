@@ -12,6 +12,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import type { Env } from "../env";
 import { searchCalls } from "./tools/search_calls";
 import { getCall } from "./tools/get_call";
+import { findCall } from "./tools/find_call";
 import { listFollowups } from "./tools/list_followups";
 import { findActionItemsFor } from "./tools/find_action_items_for";
 import { recentCalls } from "./tools/recent_calls";
@@ -19,7 +20,7 @@ import { answerFromTranscript } from "./tools/answer_from_transcript";
 
 export function createMcpServer(env: Env): McpServer {
   const server = new McpServer(
-    { name: "aftercall", version: "0.5.0" },
+    { name: "aftercall", version: "0.6.0" },
     { capabilities: { tools: {} } },
   );
 
@@ -28,9 +29,14 @@ export function createMcpServer(env: Env): McpServer {
     {
       title: "Search calls",
       description:
-        "Semantic search across indexed Bluedot call transcripts. Returns the top matching calls by vector similarity, one line per call, with a snippet and relevance score.",
+        "Find calls BY TOPIC or theme — what was discussed, decided, or mentioned across meetings (e.g. 'pricing pushback', 'the Vectorize migration'). Ranks calls by semantic similarity of their transcript content. Do NOT use this to look up a specific call by a URL, meeting code, title, or person's name — those are identifiers, not topics, and will return irrelevant matches; use `find_call` instead.",
       inputSchema: {
-        query: z.string().min(1).describe("Natural-language query to search for."),
+        query: z
+          .string()
+          .min(1)
+          .describe(
+            "A topic, theme, or phrase describing WHAT was talked about. Not a URL, meeting id, title, or name — if you have one of those, use `find_call`.",
+          ),
         limit: z
           .number()
           .int()
@@ -44,16 +50,43 @@ export function createMcpServer(env: Env): McpServer {
   );
 
   server.registerTool(
+    "find_call",
+    {
+      title: "Find call by identifier",
+      description:
+        "Locate a SPECIFIC call from anything that names or points to it: a Google Meet / Zoom URL (`https://meet.google.com/www-jjni-xtd`), a bare meeting code (`www-jjni-xtd`), a hex id, a meeting title, or a participant name/email. Normalizes the input itself (you do NOT need to strip the URL scheme) and returns candidate calls with their exact `video_id`. Use this — not `search_calls` — whenever the user gives you something that identifies a particular meeting rather than describing a topic. After a single match, use its `video_id` with `get_call` or `answer_from_transcript`.",
+      inputSchema: {
+        query: z
+          .string()
+          .min(1)
+          .describe(
+            "A meeting URL, meeting code, hex id, title fragment, or participant name/email. Paste it verbatim — normalization is handled for you.",
+          ),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(25)
+          .optional()
+          .describe("Max candidate calls to return (default 10, max 25)."),
+      },
+    },
+    async (args) => (await findCall(args, env)) as any,
+  );
+
+  server.registerTool(
     "get_call",
     {
       title: "Get call",
       description:
-        "Fetch a single call transcript's full details (title, summary, participants, action items) by its video ID.",
+        "Fetch ONE call's full details (summary, participants, action items). Accepts an exact `video_id` (as returned by `find_call`/`search_calls`/`recent_calls`) and also tolerates a pasted Meet/Zoom URL, bare code, or title — it normalizes and falls back to fuzzy match, returning a disambiguation list if several calls match. To search by topic use `search_calls`; to resolve a tricky identifier first use `find_call`.",
       inputSchema: {
         video_id: z
           .string()
           .min(1)
-          .describe("The video_id of the call (e.g. `https://meet.google.com/abc-xyz`)."),
+          .describe(
+            "Exact `video_id` from another tool's results (pass through unchanged), or an identifier to resolve (Meet/Zoom URL, meeting code, or title).",
+          ),
       },
     },
     async (args) => (await getCall(args, env)) as any,

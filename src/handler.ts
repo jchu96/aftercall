@@ -10,7 +10,7 @@ import {
   type BluedotWebhookPayload,
 } from "./bluedot";
 import { extractFromSummary, DEFAULT_MODEL } from "./extract";
-import { chunkTranscript, generateEmbeddings } from "./embeddings";
+import { chunkTranscript, generateEmbeddings, CHUNK_SCHEMA_VERSION } from "./embeddings";
 import {
   upsertFromTranscriptEvent,
   upsertFromSummaryEvent,
@@ -120,7 +120,14 @@ async function handleTranscriptEvent(
           both_events_present: upsert.bothEventsPresent,
         });
 
-        const chunks = chunkTranscript(normalized.transcriptText, { maxTokens: 500, overlapTokens: 50 });
+        const speakers = normalized.attendees
+          .map((a) => a.name ?? a.email)
+          .filter((s): s is string => Boolean(s));
+        const chunks = chunkTranscript(normalized.transcriptText, {
+          maxTokens: 500,
+          overlapTokens: 50,
+          speakers,
+        });
         const embedded = await Sentry.startSpan(
           { name: "bluedot.openai.embed", op: "ai.embeddings", attributes: { chunks: chunks.length } },
           () => generateEmbeddings(chunks, { client: deps.openai }),
@@ -135,6 +142,13 @@ async function handleTranscriptEvent(
           { name: "bluedot.vectorize.upsert", op: "db.write", attributes: { count: vectorChunks.length } },
           () => upsertChunkEmbeddings(deps.env.VECTORIZE, vectorChunks),
         );
+        // Record chunk count + schema version so the reindex script can target
+        // rows whose vectors predate the current chunking algorithm.
+        await deps.env.DB.prepare(
+          `UPDATE transcripts SET chunk_count = ?1, chunk_schema_version = ?2 WHERE id = ?3`,
+        )
+          .bind(vectorChunks.length, CHUNK_SCHEMA_VERSION, upsert.transcriptId)
+          .run();
         log("info", "vectors_upserted", { video_id: normalized.videoId, count: vectorChunks.length });
 
         if (upsert.bothEventsPresent && !upsert.alreadyNotionSynced) {

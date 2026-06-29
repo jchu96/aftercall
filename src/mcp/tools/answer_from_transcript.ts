@@ -1,8 +1,10 @@
 import OpenAI from "openai";
 import type { Env } from "../../env";
-import { EMBEDDING_MODEL, EMBEDDING_DIMENSIONS } from "../../embeddings";
+import { chunkTranscript } from "../../embeddings";
+import { embedQuery } from "../../embed";
 import { DEFAULT_MODEL } from "../../extract";
 import type { ToolResult } from "./recent_calls";
+import { resolveTranscript, formatCandidates } from "../resolve";
 
 export interface AnswerFromTranscriptInput {
   video_id: string;
@@ -25,7 +27,40 @@ interface TranscriptRow {
 const TOP_K = 8;
 const RAW_TEXT_FALLBACK_MAX = 24_000;
 
-const SYSTEM_PROMPT = `You answer questions about a single meeting using only the provided transcript excerpts. Quote or paraphrase specifics from the excerpts when relevant. If the excerpts don't contain the answer, say so plainly — do not invent details.`;
+const SYSTEM_PROMPT = `You answer questions about a single meeting using only the provided transcript excerpts.
+
+Each excerpt is verbatim transcript in \`Speaker Name: utterance\` line format; one excerpt may contain several speakers and turns. Attribute every statement to the exact speaker whose label precedes it — never merge or swap speakers. A line marked \`(continued)\` is the same speaker continuing. If asked who said something and the label is absent or ambiguous, say so rather than guessing.
+
+Quote or paraphrase specifics from the excerpts when relevant. If the excerpts don't contain the answer, say so plainly — do not invent details.`;
+
+/**
+ * Cold-Vectorize fallback: instead of blindly truncating raw_text to its first
+ * N chars (which drops late content), turn-chunk it and pick the chunks whose
+ * words overlap the question, preserving original order. No embeddings — this
+ * is the fallback for exactly when the vector index hasn't caught up.
+ */
+function selectFallbackExcerpts(rawText: string, question: string, budget: number): string[] {
+  const chunks = chunkTranscript(rawText, { maxTokens: 500 });
+  const qWords = new Set(
+    (question.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter((w) => w.length > 2),
+  );
+  const scored = chunks.map((c, i) => {
+    const words = c.text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+    let score = 0;
+    for (const w of words) if (qWords.has(w)) score++;
+    return { i, text: c.text, score };
+  });
+  const ranked = [...scored].sort((a, b) => b.score - a.score || a.i - b.i);
+  const picked: typeof ranked = [];
+  let used = 0;
+  for (const s of ranked) {
+    if (picked.length > 0 && used + s.text.length > budget) break;
+    picked.push(s);
+    used += s.text.length;
+  }
+  picked.sort((a, b) => a.i - b.i);
+  return picked.map((p) => p.text);
+}
 
 function buildUserMessage(title: string, excerpts: string[], question: string): string {
   const joined = excerpts.map((e, i) => `[excerpt ${i + 1}]\n${e}`).join("\n\n---\n\n");
@@ -47,9 +82,29 @@ export async function answerFromTranscript(
   const retries = deps.retries ?? 3;
   const retryDelayMs = deps.retryDelayMs ?? 500;
 
+  // Exact → normalized → fuzzy resolution so a pasted URL / code / title works.
+  const resolved = await resolveTranscript(input.video_id, env);
+  if (resolved.kind === "miss") {
+    return {
+      content: [{ type: "text", text: `Call not found: \`${input.video_id}\`` }],
+    };
+  }
+  if (resolved.kind === "ambiguous") {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Multiple calls match "${input.video_id}" — re-run answer_from_transcript with one exact \`video_id\`:\n\n${formatCandidates(
+            resolved.rows,
+          )}`,
+        },
+      ],
+    };
+  }
+
   const row = await env.DB
-    .prepare("SELECT id, raw_text, title FROM transcripts WHERE video_id = ?1")
-    .bind(input.video_id)
+    .prepare("SELECT id, raw_text, title FROM transcripts WHERE id = ?1")
+    .bind(resolved.row.id)
     .first<TranscriptRow>();
 
   if (!row) {
@@ -60,12 +115,7 @@ export async function answerFromTranscript(
     };
   }
 
-  const embedResp = await openai.embeddings.create({
-    model: EMBEDDING_MODEL,
-    input: input.question,
-    dimensions: EMBEDDING_DIMENSIONS,
-  });
-  const queryVector = embedResp.data[0].embedding;
+  const queryVector = await embedQuery(openai, input.question);
 
   const queryResult = await vectorize.query(queryVector, {
     topK: TOP_K,
@@ -78,10 +128,11 @@ export async function answerFromTranscript(
     .filter((t) => t.length > 0);
 
   if (excerpts.length === 0) {
-    // Vectorize is eventually consistent; fall back to the full raw transcript
-    // stored in D1 when the index hasn't caught up (or the vector filter missed).
+    // Vectorize is eventually consistent; fall back to the raw transcript in D1
+    // when the index hasn't caught up. Pick question-relevant, speaker-labeled
+    // turns rather than blindly truncating the first N chars.
     if (row.raw_text && row.raw_text.length > 0) {
-      excerpts = [row.raw_text.slice(0, RAW_TEXT_FALLBACK_MAX)];
+      excerpts = selectFallbackExcerpts(row.raw_text, input.question, RAW_TEXT_FALLBACK_MAX);
     } else {
       return {
         content: [

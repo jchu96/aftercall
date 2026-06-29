@@ -122,6 +122,63 @@ describe("answerFromTranscript", () => {
     expect(out.content[0].text).toBe("fallback-based answer");
   });
 
+  it("fallback selects the question-relevant turn, not just the head of raw_text", async () => {
+    const head = Array.from({ length: 30 }, (_, i) => `Alice: filler line ${i} about logistics.`).join("\n");
+    const relevant = "Bob: The pricing decision was to raise enterprise tiers by twenty percent.";
+    await seedTranscript({
+      id: 77,
+      videoId: "vid_77",
+      rawText: `${head}\n${relevant}`,
+    });
+    const { client, create } = fakeOpenAI("answer about pricing");
+    const vectorize = fakeVectorize([]); // force raw_text fallback
+
+    await answerFromTranscript(
+      { video_id: "vid_77", question: "what was the pricing decision?" },
+      env,
+      { openai: client, vectorize },
+    );
+
+    const userMsg = (create.mock.calls[0][0] as { messages: Array<{ role: string; content: string }> })
+      .messages.find((m) => m.role === "user")!.content;
+    expect(userMsg).toContain("raise enterprise tiers by twenty percent");
+  });
+
+  it("resolves a schemeless-stored row when given a full Meet URL", async () => {
+    await env.DB.prepare(
+      `INSERT INTO transcripts (id, video_id, title, raw_text, summary, meeting_code)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+    )
+      .bind(50, "meet.google.com/www-jjni-xtd", "x", "Bob: hi", "s", "www-jjni-xtd")
+      .run();
+    const { client } = fakeOpenAI("ok");
+    const vectorize = fakeVectorize([{ score: 0.9, chunk_text: "Bob: hi", transcript_id: 50 }]);
+
+    await answerFromTranscript(
+      { video_id: "https://meet.google.com/www-jjni-xtd", question: "q" },
+      env,
+      { openai: client, vectorize },
+    );
+
+    const [, opts] = (vectorize.query as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(opts.filter).toEqual({ transcript_id: 50 });
+  });
+
+  it("includes the Speaker: format instruction in the system prompt", async () => {
+    await seedTranscript({ id: 8, videoId: "vid_8" });
+    const { client, create } = fakeOpenAI("a");
+    const vectorize = fakeVectorize([{ score: 0.9, chunk_text: "Bob: hi", transcript_id: 8 }]);
+
+    await answerFromTranscript({ video_id: "vid_8", question: "q" }, env, {
+      openai: client,
+      vectorize,
+    });
+
+    const sysMsg = (create.mock.calls[0][0] as { messages: Array<{ role: string; content: string }> })
+      .messages.find((m) => m.role === "system")!.content;
+    expect(sysMsg).toMatch(/speaker/i);
+  });
+
   it("returns a not-yet-indexed message when vectorize returns nothing AND raw_text is empty", async () => {
     await seedTranscript({ id: 11, videoId: "vid_11", rawText: "" });
     const { client, create } = fakeOpenAI("should not be called");

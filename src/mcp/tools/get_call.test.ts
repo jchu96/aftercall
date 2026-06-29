@@ -46,4 +46,29 @@ describe("getCall", () => {
     const out = await getCall({ video_id: "nonexistent" }, env);
     expect(out.content[0].text.toLowerCase()).toContain("not found");
   });
+
+  it("resolves a schemeless-stored row when given a full Meet URL", async () => {
+    await env.DB.prepare(
+      `INSERT INTO transcripts (video_id, title, meeting_code, summary, participants, action_items)
+       VALUES (?1, ?2, ?3, ?4, '[]', '[]')`,
+    )
+      .bind("meet.google.com/www-jjni-xtd", "Schemeless call", "www-jjni-xtd", "A summary.")
+      .run();
+
+    const out = await getCall({ video_id: "https://meet.google.com/www-jjni-xtd" }, env);
+    expect(out.content[0].text).toContain("Schemeless call");
+  });
+
+  it("returns a disambiguation list (not a guessed row) when a fuzzy query matches multiple", async () => {
+    await env.DB.prepare(
+      `INSERT INTO transcripts (video_id, title, meeting_code, summary, participants, action_items)
+       VALUES ('a1','Planning one','c1','s','[]','[]'), ('a2','Planning two','c2','s','[]','[]')`,
+    ).run();
+
+    const out = await getCall({ video_id: "Planning" }, env);
+    const text = out.content[0].text;
+    expect(text).toContain("Planning one");
+    expect(text).toContain("Planning two");
+    expect(text.toLowerCase()).toMatch(/multiple|pick|which/);
+  });
 });
