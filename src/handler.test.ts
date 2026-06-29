@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
 import { handleWebhook, type HandlerDeps } from "./handler";
+import { CHUNK_SCHEMA_VERSION } from "./embeddings";
 import { setupD1 } from "../test/setup-d1";
 
 beforeEach(async () => {
@@ -113,12 +114,23 @@ describe("handleWebhook — single event arrival", () => {
     expect(deps.openai.chat.completions.create).not.toHaveBeenCalled(); // no extraction yet
 
     const row = await env.DB
-      .prepare("SELECT raw_text, summary, notion_synced_at FROM transcripts WHERE video_id = ?")
+      .prepare(
+        "SELECT raw_text, summary, notion_synced_at, chunk_count, chunk_schema_version FROM transcripts WHERE video_id = ?",
+      )
       .bind(VIDEO_ID)
-      .first<{ raw_text: string; summary: string | null; notion_synced_at: string | null }>();
+      .first<{
+        raw_text: string;
+        summary: string | null;
+        notion_synced_at: string | null;
+        chunk_count: number | null;
+        chunk_schema_version: number | null;
+      }>();
     expect(row?.raw_text).toBeTruthy();
     expect(row?.summary).toBeNull();
     expect(row?.notion_synced_at).toBeNull();
+    // Chunk metadata recorded so reindex --stale-only can target pre-v2 rows.
+    expect(row?.chunk_schema_version).toBe(CHUNK_SCHEMA_VERSION);
+    expect(row?.chunk_count).toBeGreaterThan(0);
   });
 
   it("summary event alone: extracts via OpenAI, writes summary, no Notion (transcript missing)", async () => {

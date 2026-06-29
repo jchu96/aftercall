@@ -114,3 +114,29 @@ describe("markNotionSynced", () => {
     expect(second).toBe(false);
   });
 });
+
+describe("meeting_code population", () => {
+  async function codeFor(videoId: string): Promise<string | null> {
+    const row = await env.DB
+      .prepare("SELECT meeting_code FROM transcripts WHERE video_id = ?1")
+      .bind(videoId)
+      .first<{ meeting_code: string | null }>();
+    return row?.meeting_code ?? null;
+  }
+
+  it("derives meeting_code from video_id on transcript-event insert", async () => {
+    await upsertFromTranscriptEvent(env.DB, transcriptInput);
+    expect(await codeFor(VIDEO_ID)).toBe("test");
+  });
+
+  it("derives meeting_code on summary-event insert", async () => {
+    await upsertFromSummaryEvent(env.DB, summaryInput);
+    expect(await codeFor(VIDEO_ID)).toBe("test");
+  });
+
+  it("both events for one meeting agree on meeting_code", async () => {
+    await upsertFromTranscriptEvent(env.DB, transcriptInput);
+    await upsertFromSummaryEvent(env.DB, summaryInput);
+    expect(await codeFor(VIDEO_ID)).toBe("test");
+  });
+});

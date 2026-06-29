@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import type { Env } from "../../env";
-import { EMBEDDING_MODEL, EMBEDDING_DIMENSIONS } from "../../embeddings";
+import { embedQuery } from "../../embed";
 import type { ToolResult } from "./recent_calls";
 
 export interface SearchCallsInput {
@@ -30,12 +30,7 @@ export async function searchCalls(
   const openai = deps.openai ?? new OpenAI({ apiKey: env.OPENAI_API_KEY });
   const vectorize = deps.vectorize ?? env.VECTORIZE;
 
-  const embedResp = await openai.embeddings.create({
-    model: EMBEDDING_MODEL,
-    input: input.query,
-    dimensions: EMBEDDING_DIMENSIONS,
-  });
-  const queryVector = embedResp.data[0].embedding;
+  const queryVector = await embedQuery(openai, input.query);
 
   const queryResult = await vectorize.query(queryVector, {
     topK: limit,

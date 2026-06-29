@@ -20,6 +20,16 @@ export function vectorIdFor(transcriptId: number, chunkIndex: number): string {
 }
 
 /**
+ * IDs of stale "tail" vectors to delete when re-chunking produces FEWER chunks
+ * than before. Vectorize has no list-by-prefix at delete time, so we overshoot
+ * by `pad` past the new count; deleting nonexistent ids is a harmless no-op.
+ * Returns `${transcriptId}-${newChunkCount}` … `${transcriptId}-${newChunkCount+pad-1}`.
+ */
+export function tailDeleteIds(transcriptId: number, newChunkCount: number, pad = 64): string[] {
+  return Array.from({ length: pad }, (_, k) => vectorIdFor(transcriptId, newChunkCount + k));
+}
+
+/**
  * Upsert chunk embeddings into a Cloudflare Vectorize index.
  *
  * - IDs are deterministic (`{transcript_id}-{chunk_index}`) so retries from

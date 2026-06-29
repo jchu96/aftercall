@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-Six tools are exposed at `/mcp`. Every tool returns a single `text` content block — Claude.ai renders the markdown directly.
+Seven tools are exposed at `/mcp`. Every tool returns a single `text` content block — Claude.ai renders the markdown directly.
 
 All tools require a valid bearer token (minted via the GitHub OAuth flow — see [auth.md](./auth.md)).
 
@@ -38,15 +38,44 @@ Found 3 calls matching "IronRidge contract":
 
 ---
 
+## `find_call`
+
+Locate a **specific** call by any identifier — distinct from `search_calls`, which is for topics. Pure lexical (no embeddings): normalizes the input through `resolveMeetingCode()` and matches against the indexed `meeting_code`, the raw `video_id`, the title, and participant names/emails (`json_each`). Ranks exact-identifier hits above title/participant matches.
+
+**Input**
+
+| Param | Type | Required | Default | Notes |
+|-------|------|----------|---------|-------|
+| `query` | string | yes | — | A Meet/Zoom URL, bare meeting code, hex id, title fragment, or participant name/email. Paste verbatim — normalization (scheme/`www.`/query-string stripping) is handled for you. |
+| `limit` | integer (1–25) | no | 10 | Max candidate calls returned. |
+
+**Output**
+
+One line per candidate with its exact `video_id`, ranked. A pasted `https://meet.google.com/www-jjni-xtd` resolves a row stored as the schemeless `meet.google.com/www-jjni-xtd`. On no match, the message names the recovery tool (`search_calls` for topics, `recent_calls` to browse).
+
+```
+Resolved "https://meet.google.com/www-jjni-xtd" → 1 call. Use its `video_id` with get_call or answer_from_transcript:
+
+• [2026-06-12] **Pricing sync** — `meet.google.com/www-jjni-xtd`
+```
+
+**Sample prompts**
+
+- _"Find the call at https://meet.google.com/www-jjni-xtd."_
+- _"Which meeting was the 'Main Service Panel Naming' call?"_
+- _"Pull up my call with Pierce."_
+
+---
+
 ## `get_call`
 
-Fetch one call's full details by `video_id`.
+Fetch one call's full details. Accepts an exact `video_id` and also tolerates a pasted URL / code / title — it runs the exact → normalized (`meeting_code`) → fuzzy chain and returns a disambiguation list if several calls match.
 
 **Input**
 
 | Param | Type | Required | Notes |
 |-------|------|----------|-------|
-| `video_id` | string | yes | Usually a Google Meet URL (`https://meet.google.com/abc-xyz`). |
+| `video_id` | string | yes | Exact `video_id` from another tool, or an identifier to resolve (Meet/Zoom URL, meeting code, or title). |
 
 **Output**
 

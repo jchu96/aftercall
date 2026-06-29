@@ -127,12 +127,15 @@ Full OAuth + Bluedot + debug walkthrough: [`docs/auth.md`](./docs/auth.md).
 
 | Tool | What it does |
 |------|---|
-| [`search_calls(query, limit?)`](./docs/tools.md#search_calls) | Semantic search over all transcripts via OpenAI embeddings + Vectorize |
-| [`get_call(video_id)`](./docs/tools.md#get_call) | Full details of one call: summary, participants, action items |
+| [`search_calls(query, limit?)`](./docs/tools.md#search_calls) | Semantic search **by topic** over all transcripts via OpenAI embeddings + Vectorize |
+| [`find_call(query, limit?)`](./docs/tools.md#find_call) | Locate a **specific** call by identifier — Meet/Zoom URL, meeting code, hex id, title, or participant (lexical, no embeddings) |
+| [`get_call(video_id)`](./docs/tools.md#get_call) | Full details of one call: summary, participants, action items (normalizes + fuzzy-resolves the id) |
 | [`answer_from_transcript(video_id, question)`](./docs/tools.md#answer_from_transcript) | RAG over a single call — drill-down Q&A grounded in that meeting's transcript |
 | [`list_followups(status?, source?, limit?)`](./docs/tools.md#list_followups) | Query the Notion Followups DB with select filters |
 | [`find_action_items_for(person, since?)`](./docs/tools.md#find_action_items_for) | All action items assigned to a person (substring match on owner) |
 | [`recent_calls(days?)`](./docs/tools.md#recent_calls) | Last N days of calls, newest first |
+
+> **Identifier vs. topic:** `search_calls` is for *what was discussed* (semantic). `find_call` is for *which specific meeting* (a pasted URL, code, title, or name). `video_id` is stored verbatim as Bluedot sends it (URL / schemeless path / hex), so an indexed `meeting_code` column — derived via `resolveMeetingCode()` at ingest — lets any form resolve the same call. Re-derive existing rows with `npx tsx scripts/reindex-vectorize.ts` (also re-embeds with the speaker-aware chunker).
 
 Sample prompts per tool: [`docs/tools.md`](./docs/tools.md).
 
@@ -271,8 +274,10 @@ src/
     ├── auth/
     │   ├── github.ts         # /authorize + /auth/github/callback
     │   └── allowlist.ts      # case-insensitive username check
+    ├── resolve.ts            # exact→normalized→fuzzy transcript resolver (shared)
     └── tools/
         ├── search_calls.ts
+        ├── find_call.ts
         ├── get_call.ts
         ├── list_followups.ts
         ├── find_action_items_for.ts

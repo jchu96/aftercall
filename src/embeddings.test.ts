@@ -38,6 +38,149 @@ describe("chunkTranscript", () => {
   });
 });
 
+const SPEAKER_LINE = /^[^:\n]+: /;
+
+describe("chunkTranscript — turn-aware (speaker-labeled transcripts)", () => {
+  it("packs several short turns under the limit into one chunk carrying every label", () => {
+    const text = [
+      "Andy Pilipović: Oh, you good?",
+      "Jeremy Chu: I'm so tired.",
+      "Andy Pilipović: I just got my apartment yesterday.",
+    ].join("\n");
+    const chunks = chunkTranscript(text, { maxTokens: 500 });
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].text).toContain("Andy Pilipović:");
+    expect(chunks[0].text).toContain("Jeremy Chu:");
+  });
+
+  it("every emitted chunk begins with a Speaker: label (never starts mid-utterance)", () => {
+    const turns: string[] = [];
+    for (let i = 0; i < 60; i++) {
+      const who = i % 2 === 0 ? "Jeremy Chu" : "Andy Pilipović";
+      turns.push(`${who}: This is utterance number ${i} with enough words to add length.`);
+    }
+    const chunks = chunkTranscript(turns.join("\n"), { maxTokens: 80, overlapTokens: 0 });
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const c of chunks) {
+      expect(c.text).toMatch(SPEAKER_LINE);
+    }
+  });
+
+  it("never splits a turn across chunks (each chunk boundary falls between turns)", () => {
+    const turns: string[] = [];
+    for (let i = 0; i < 40; i++) {
+      turns.push(`Speaker ${i % 3}: Sentence one here. Sentence two here. Sentence three here.`);
+    }
+    const chunks = chunkTranscript(turns.join("\n"), { maxTokens: 90, overlapTokens: 0 });
+    for (const c of chunks) {
+      // No internal line should be an unlabeled orphan: every non-empty line is a turn.
+      for (const line of c.text.split("\n")) {
+        if (line.trim()) expect(line).toMatch(SPEAKER_LINE);
+      }
+    }
+  });
+
+  it("attributes a continuation line (no Name: prefix) to the prior speaker", () => {
+    const text = [
+      "Jeremy Chu: I wanted to run something by you and it is a fairly long",
+      "thought that wrapped onto a second line without a label.",
+      "Andy Pilipović: Sure, go ahead.",
+    ].join("\n");
+    const chunks = chunkTranscript(text, { maxTokens: 500 });
+    expect(chunks[0].text).toContain("wrapped onto a second line");
+    // The continuation text stays under Jeremy's turn, not orphaned.
+    const jeremyIdx = chunks[0].text.indexOf("Jeremy Chu:");
+    const andyIdx = chunks[0].text.indexOf("Andy Pilipović:");
+    const contIdx = chunks[0].text.indexOf("wrapped onto a second line");
+    expect(contIdx).toBeGreaterThan(jeremyIdx);
+    expect(contIdx).toBeLessThan(andyIdx);
+  });
+
+  it("merges consecutive same-speaker fragment lines into one labeled turn", () => {
+    const text = ["Jeremy Chu: I.", "Jeremy Chu: That's.", "Jeremy Chu: Anyway."].join("\n");
+    const chunks = chunkTranscript(text, { maxTokens: 500 });
+    // One merged turn → the label appears exactly once.
+    const labelCount = (chunks[0].text.match(/Jeremy Chu:/g) ?? []).length;
+    expect(labelCount).toBe(1);
+    expect(chunks[0].text).toContain("I.");
+    expect(chunks[0].text).toContain("That's.");
+    expect(chunks[0].text).toContain("Anyway.");
+  });
+
+  it("starts a new turn on speaker change (does not merge different speakers)", () => {
+    const text = ["Jeremy Chu: Hi.", "Andy Pilipović: Hey.", "Jeremy Chu: Bye."].join("\n");
+    const chunks = chunkTranscript(text, { maxTokens: 500 });
+    expect((chunks[0].text.match(/Jeremy Chu:/g) ?? []).length).toBe(2);
+    expect((chunks[0].text.match(/Andy Pilipović:/g) ?? []).length).toBe(1);
+  });
+
+  it("splits an oversized single turn but re-prepends the speaker label to each piece", () => {
+    const long = Array.from({ length: 60 }, (_, i) => `word${i} is here.`).join(" ");
+    const text = `Jeremy Chu: ${long}`;
+    const chunks = chunkTranscript(text, { maxTokens: 40, overlapTokens: 0 });
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const c of chunks) {
+      expect(c.text).toMatch(/^Jeremy Chu( \(continued\))?: /);
+    }
+    // Continuation marker on 2nd+ pieces.
+    expect(chunks.at(-1)!.text).toContain("(continued)");
+  });
+
+  it("does not treat a mid-utterance colon as a new speaker", () => {
+    const text = [
+      "Jeremy Chu: So here's the deal: we ship Friday.",
+      "Andy Pilipović: Works for me.",
+    ].join("\n");
+    const chunks = chunkTranscript(text, { maxTokens: 500 });
+    // Only two real turns — "here's the deal" must not become a speaker.
+    expect((chunks[0].text.match(SPEAKER_LINE.source ? /^[^:\n]+: /gm : / /g) ?? []).length).toBe(2);
+    expect(chunks[0].text).not.toMatch(/here's the deal:\s*$/m);
+  });
+
+  it("keeps every chunk within maxChars even in overlap mode (no 2× overflow)", () => {
+    const turns: string[] = [];
+    for (let i = 0; i < 20; i++) {
+      turns.push(`Speaker ${i % 2}: ${"x".repeat(55)}`); // ~65-char turns, near the budget
+    }
+    const maxTokens = 25; // maxChars = 100
+    const chunks = chunkTranscript(turns.join("\n"), { maxTokens, overlapTokens: 10 });
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const c of chunks) {
+      expect(c.text.length).toBeLessThanOrEqual(maxTokens * 4);
+    }
+  });
+
+  it("attributes non-Latin-script speaker names (e.g. CJK) even without a roster", () => {
+    const text = "Alice: hello everyone\n李明: 大家好 and then some more words here";
+    const chunks = chunkTranscript(text, { maxTokens: 500 }); // no `speakers` roster
+    expect(chunks[0].text).toMatch(/^李明: /m); // 李明 starts its own turn line
+    expect((chunks[0].text.match(/李明:/g) ?? []).length).toBe(1);
+  });
+
+  it("parses speaker turns identically whether lines are \\n or \\r\\n separated", () => {
+    const lines = ["Jeremy Chu: First thing.", "Andy Pilipović: Second thing.", "Jeremy Chu: Third."];
+    const lf = chunkTranscript(lines.join("\n"), { maxTokens: 500 });
+    const crlf = chunkTranscript(lines.join("\r\n"), { maxTokens: 500 });
+    expect(crlf[0].text).toBe(lf[0].text);
+    // No stray carriage returns leak into the rendered turns.
+    expect(crlf[0].text).not.toContain("\r");
+    expect((crlf[0].text.match(/Jeremy Chu:/g) ?? []).length).toBe(2);
+  });
+
+  it("applies 1-turn overlap when overlapTokens > 0 (boundary turn repeated, still labeled)", () => {
+    const turns: string[] = [];
+    for (let i = 0; i < 30; i++) {
+      turns.push(`Speaker ${i % 2}: Utterance ${i} padded out with several extra words here.`);
+    }
+    const chunks = chunkTranscript(turns.join("\n"), { maxTokens: 80, overlapTokens: 20 });
+    expect(chunks.length).toBeGreaterThan(1);
+    // The last turn of chunk i should reappear as the first turn of chunk i+1.
+    const firstChunkLastLine = chunks[0].text.trim().split("\n").at(-1)!;
+    expect(chunks[1].text).toContain(firstChunkLastLine.trim());
+    expect(chunks[1].text).toMatch(SPEAKER_LINE);
+  });
+});
+
 describe("generateEmbeddings", () => {
   it("calls OpenAI embeddings API and returns vectors", async () => {
     const mockEmbedding = new Array(1536).fill(0).map((_, i) => i / 1536);
