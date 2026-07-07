@@ -15,6 +15,10 @@ wrangler.toml
 # Sentry Config File
 .sentryclirc
 
-# Conductor working state (decision artifacts are committed; state is not)
+# Conductor working state (state is not committed)
 conductor/setup_state.json
 conductor/**/*_state.json
+
+# Track specs are local-only working docs — public repo, keep design/roadmap
+# and any internal (client/infra) references out of git.
+conductor/tracks/
