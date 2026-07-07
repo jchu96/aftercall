@@ -22,3 +22,4 @@ conductor/**/*_state.json
 # Track specs are local-only working docs — public repo, keep design/roadmap
 # and any internal (client/infra) references out of git.
 conductor/tracks/
+staging/
