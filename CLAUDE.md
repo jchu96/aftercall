@@ -49,6 +49,7 @@ Single user (GitHub username allowlist via `ALLOWED_USERS` env). Friends fork to
 | Apply D1 migration | `npx wrangler d1 migrations apply aftercall-db --remote` |
 | Set a secret | `npx wrangler secret put <NAME>` |
 | Reprocess a call | `npx wrangler d1 execute aftercall-db --remote --command "DELETE FROM transcripts WHERE video_id = '...'"` then refire |
+| Enrich a call recording (optional) | `GEMINI_API_KEY=... npm run enrich -- "<recording.mp4>"` → dossier under `staging/dossiers/` (Gemini video pass; script-only) |
 | Rotate MCP bearer (yours) | `POST /auth/revoke` with the current bearer → revokes grant |
 | List KV entries (debug OAuth) | `npx wrangler kv key list --binding OAUTH_KV` |
 | Inspect a KV entry | `npx wrangler kv key get <key> --binding OAUTH_KV` |
@@ -59,7 +60,7 @@ Single user (GitHub username allowlist via `ALLOWED_USERS` env). Friends fork to
 - ❌ Add a Notion `Title` property — Notion's default title property is named `Name`. Use `Name`.
 - ❌ Test against mocked D1 — use `@cloudflare/vitest-pool-workers` so tests hit real SQLite via miniflare. Vectorize must still be mocked (no miniflare support yet).
 - ❌ Forget `--remote` on `wrangler d1 migrations apply` for the prod database.
-- ❌ Re-introduce Anthropic — single LLM provider (OpenAI) is intentional, simplifies deploy + setup story for forkers.
+- ❌ Re-introduce Anthropic — single LLM provider (OpenAI) is intentional, simplifies deploy + setup story for forkers. **The one sanctioned exception is Gemini for VIDEO understanding**, used ONLY by `scripts/enrich-video.ts` (video-in has no OpenAI equivalent). Keep it script-only: never import `@google/genai` or call Gemini from the Worker bundle path (`src/`), and keep `GEMINI_API_KEY` optional so forkers without it still clone + deploy. Text extraction + embeddings stay OpenAI.
 - ❌ Skip the `global_fetch_strictly_public` compat flag — `@cloudflare/workers-oauth-provider` warns at module load and vitest-pool-workers fails without it.
 - ❌ Import `@modelcontextprotocol/sdk` at the top of any non-MCP module path — its transitive `ajv` dep breaks vitest-pool-workers' ESM shim. Keep SDK imports behind the dynamic-import boundary in `src/mcp/handler.ts`.
 - ❌ Add stateful MCP sessions without a plan — the Streamable HTTP transport's stateful mode carries server memory across requests, which doesn't compose with CF Workers' isolate-per-request model unless you persist session state in KV/DO yourself.
@@ -70,10 +71,11 @@ Single user (GitHub username allowlist via `ALLOWED_USERS` env). Friends fork to
 See [README.md](./README.md) for full structure. Quick map:
 
 ```
-src/             # Worker code (handler, extract, d1, vectorize, notion, ...)
-scripts/         # setup.ts (interactive provisioning), smoke-vectorize.ts
+src/             # Worker code (handler, extract, d1, vectorize, notion, mcp/, ...)
+scripts/         # setup.ts, reindex-vectorize.ts, enrich-video.ts (optional Gemini), smoke-*
 drizzle/         # Numbered SQL migrations
 test/            # vitest setup (D1 migrations + ProvidedEnv typing)
+staging/         # git-ignored scratch — enrich-video dossiers land in staging/dossiers/
 ```
 
 ## Plan-reviewer discipline
