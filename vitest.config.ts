@@ -25,6 +25,6 @@ export default defineWorkersConfig({
         },
       },
     },
-    include: ["src/**/*.test.ts", "test/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "test/**/*.test.ts", "scripts/**/*.test.ts"],
   },
 });

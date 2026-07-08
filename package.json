@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "setup": "node scripts/setup.ts"
+    "setup": "node scripts/setup.ts",
+    "enrich": "tsx scripts/enrich-video.ts"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.4.0",

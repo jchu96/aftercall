@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Video enrichment (optional, script-only): `scripts/enrich-video.ts`** — point it at a screen recording of a call and it uploads the video to Google Gemini, analyzes it *with the call's transcript as context* (resolved from the filename's meeting code via `resolveMeetingCode()`), and writes an issue-grade dossier of on-screen problems: verbatim UI text, the reporter's quote, the click-path as performed, a screenshot per incident, and the app URL when a browser address bar is legible. Two-pass (cheap low-res whole-call index → targeted medium-res per-incident read that also discards false positives). Output + a re-run ledger land under git-ignored `staging/dossiers/`. `npm run enrich -- "<recording>"`.
+  - Gemini is the **one sanctioned exception** to the single-provider (OpenAI) rule, scoped strictly to this script — never imported by the Worker. `GEMINI_API_KEY` is optional (falls back to `NEC_KB_GEMINI_API_KEY`); forkers without it just skip the feature. Text extraction + embeddings stay OpenAI.
+  - `app_url` is only populated when an address bar is actually visible + legible — the model is instructed to abstain rather than confabulate a hostname.
+- `enrich` npm script; `GEMINI_API_KEY` documented as an optional secret.
+
 ## [0.6.0] — 2026-06-29
 
 **Call lookup by identifier + speaker-aware RAG.** Fixes two retrieval gaps: you couldn't find a call by pasting its Meet URL (only semantic search existed, and it returns noise for identifiers), and chunk boundaries orphaned speaker labels so per-call Q&A misattributed who said what.

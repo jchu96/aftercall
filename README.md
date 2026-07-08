@@ -199,6 +199,29 @@ Full runbook: [`docs/architecture.md#operational-runbook`](./docs/architecture.m
 
 ---
 
+## Video enrichment (optional)
+
+If you record a call's screen separately, aftercall can *watch* it. [`scripts/enrich-video.ts`](./scripts/enrich-video.ts) uploads the recording to Google Gemini, analyzes it **with that call's transcript as context**, and writes a dossier of on-screen problems — the detail a transcript can't hold: the value shown in a table, an error toast, the app URL in the address bar, and the click-path the user actually performed. Handy for turning a demo or feedback call into well-formed bug/feedback reports.
+
+It's **script-only and optional**. It never runs in the Worker (which stays single-provider on OpenAI — see [CLAUDE.md](./CLAUDE.md)); forkers without a Gemini key simply don't use it.
+
+```bash
+# Prereqs: ffmpeg (brew install ffmpeg) + a Gemini API key
+export GEMINI_API_KEY=...                 # or GEMINI_MODEL to override the model
+npm run enrich -- "<path-to-recording>"   # or: npx tsx scripts/enrich-video.ts "<path>"
+```
+
+Point it at the downloaded recording — it derives the call's meeting code from the filename, pulls the transcript from D1 for context, and analyzes the video in two passes (a cheap low-res index over the whole call, then a targeted per-incident read). Output lands under `staging/dossiers/<code>-<date>/` (git-ignored): a paste-ready `dossier.md`, a structured `dossier.json`, and a screenshot per confirmed issue. A local `ledger.json` records each run so a re-run within Gemini's 48h file window skips re-upload.
+
+Flags: `--max=N` (cap incidents — sample cheaply first), `--no-frames`, `--reupload`, `--code=<meeting-code>` (override the derived code).
+
+Notes:
+- **The dossier is *observations*, not filed issues** — cross-reference against your tracker (and dedupe) before creating anything; the model has no knowledge of what's already tracked.
+- The app URL is only filled when a browser address bar is genuinely visible and legible; otherwise it's left blank by design (the model is told to abstain rather than guess a hostname).
+- Cost is roughly a dime to index an hour of video; per-incident reads are fractions of a cent.
+
+---
+
 ## Environment variables
 
 <details>
@@ -216,6 +239,7 @@ Set via `wrangler.toml` `[vars]` for non-secret config and `wrangler secret put`
 | `GITHUB_CLIENT_ID` | MCP only | GitHub OAuth App client id |
 | `GITHUB_CLIENT_SECRET` | MCP only | GitHub OAuth App client secret |
 | `SENTRY_DSN` | optional | Enables error tracking + pipeline tracing. Leave unset to disable Sentry entirely. |
+| `GEMINI_API_KEY` | optional | Only for the [video enrichment](#video-enrichment-optional) script (`scripts/enrich-video.ts`). Never read by the Worker. |
 
 ### Vars (`wrangler.toml`)
 
@@ -275,17 +299,22 @@ src/
     │   ├── github.ts         # /authorize + /auth/github/callback
     │   └── allowlist.ts      # case-insensitive username check
     ├── resolve.ts            # exact→normalized→fuzzy transcript resolver (shared)
-    └── tools/
+    └── tools/                # 7 MCP tools (pure fns, colocated tests)
         ├── search_calls.ts
         ├── find_call.ts
         ├── get_call.ts
+        ├── answer_from_transcript.ts
         ├── list_followups.ts
         ├── find_action_items_for.ts
         └── recent_calls.ts
 
 scripts/
 ├── setup.ts                  # 10-step interactive provisioning
+├── deploy.mjs                # wrangler deploy + optional Sentry source-map upload
+├── reindex-vectorize.ts      # re-embed with speaker-aware chunker + backfill meeting_code
+├── enrich-video.ts           # OPTIONAL: Gemini video enrichment → issue-grade dossier
 ├── smoke-vectorize.ts        # Vectorize round-trip smoke test
+├── smoke-answer.ts           # answer_from_transcript smoke test
 └── migrate-from-neon.ts      # historical Neon → D1 migration
 
 drizzle/                      # numbered SQL migrations
