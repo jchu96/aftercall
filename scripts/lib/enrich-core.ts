@@ -91,6 +91,21 @@ export function clipWindow(inc: Pick<Incident, "start" | "end">): { start: numbe
 }
 
 /**
+ * Absolute seconds for an incident's screenshot. Pass 2 sends a *clipped* window,
+ * and Gemini has reported absolute MM:SS in practice — but if a model ever returns
+ * a clip-relative timestamp, clamp it into the incident's widened window so the
+ * frame can't land somewhere unrelated (e.g. the top of the video). Falls back to
+ * the incident start when the reported timestamp is missing/unparseable.
+ */
+export function frameSeconds(inc: Pick<Incident, "start" | "end">, reported?: string): number {
+  const { start, end } = clipWindow(inc);
+  const fallback = parseTimecode(inc.start);
+  const ts = reported ? parseTimecode(reported) : NaN;
+  if (!Number.isFinite(ts)) return fallback;
+  return Math.min(Math.max(ts, start), end);
+}
+
+/**
  * Find a still-live prior upload to reuse (skip re-upload) — same call + same
  * byte size, not yet expired. `nowMs` is passed in to keep this pure/testable.
  */

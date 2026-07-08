@@ -34,9 +34,9 @@ import { basename, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import {
   readFlag,
-  parseTimecode,
   deriveCode,
   clipWindow,
+  frameSeconds,
   findReusableUpload,
   renderDossierMarkdown,
   type Incident,
@@ -72,7 +72,12 @@ if (!existsSync(absVideo)) {
   console.error(`Not found: ${absVideo}`);
   process.exit(1);
 }
-const maxIncidents = readFlag(argv, "max") ? Number(readFlag(argv, "max")) : Infinity;
+const maxFlag = readFlag(argv, "max");
+if (maxFlag !== undefined && !Number.isFinite(Number(maxFlag))) {
+  console.error(`--max must be a number (got "${maxFlag}").`);
+  process.exit(1);
+}
+const maxIncidents = maxFlag ? Number(maxFlag) : Infinity;
 const wantFrames = readFlag(argv, "no-frames") !== "true";
 const forceReupload = readFlag(argv, "reupload") === "true";
 
@@ -156,6 +161,18 @@ async function generate(parts: unknown[], generationConfig: Record<string, unkno
     throw new Error(`generateContent ${res.status}: ${JSON.stringify(d).slice(0, 800)}`);
   }
   return { text: d.candidates[0].content.parts[0].text, usage: d.usageMetadata };
+}
+
+/** Is a previously-uploaded Gemini file still ACTIVE? Google may evict slightly
+ *  before our client-side 48h estimate; re-check so a stale reuse falls back to a
+ *  fresh upload instead of failing at generateContent. */
+async function fileIsActive(fileName: string): Promise<boolean> {
+  try {
+    const s: any = await (await fetch(`${GEMINI_BASE}/v1beta/${fileName}?key=${KEY}`)).json();
+    return s?.state === "ACTIVE";
+  } catch {
+    return false;
+  }
 }
 
 async function uploadVideo(path: string, mimeType: string): Promise<{ fileName: string; fileUri: string }> {
@@ -346,14 +363,15 @@ async function main() {
   const mimeType = "video/mp4";
   const bytes = statSync(absVideo).size;
 
-  // Reuse a still-live upload if the ledger has one.
+  // Reuse a still-live upload if the ledger has one AND Gemini still has it.
   let fileName: string, fileUri: string;
   const existing = findReusableUpload(readLedger(), code, bytes, Date.now());
-  if (existing && !forceReupload) {
+  if (existing && !forceReupload && (await fileIsActive(existing.fileName))) {
     info(`Reusing upload from ${existing.uploadedAt} (expires ${existing.expiresAt}).`);
     fileName = existing.fileName;
     fileUri = existing.fileUri;
   } else {
+    if (existing && !forceReupload) info("  ledger upload expired/evicted — re-uploading.");
     info(`Uploading ${(bytes / 1e6).toFixed(0)}MB…`);
     ({ fileName, fileUri } = await uploadVideo(absVideo, mimeType));
     const now = new Date();
@@ -390,7 +408,7 @@ async function main() {
       let frame: string | undefined;
       if (wantFrames && detail.is_real_issue) {
         const out = join(dir, `incident-${String(i + 1).padStart(2, "0")}.png`);
-        const ts = parseTimecode(detail.evidence?.timestamp || inc.start);
+        const ts = frameSeconds(inc, detail.evidence?.timestamp);
         if (extractFrame(absVideo, ts, out)) frame = out;
       }
       items.push({ inc, detail, frame });

@@ -4,6 +4,7 @@ import {
   parseTimecode,
   deriveCode,
   clipWindow,
+  frameSeconds,
   findReusableUpload,
   renderDossierMarkdown,
   type LedgerRow,
@@ -46,6 +47,23 @@ describe("clipWindow", () => {
   it("widens the window and clamps start at 0", () => {
     expect(clipWindow({ start: "02:40", end: "02:44" })).toEqual({ start: 155, end: 172 });
     expect(clipWindow({ start: "00:02", end: "00:10" })).toEqual({ start: 0, end: 18 });
+  });
+});
+
+describe("frameSeconds", () => {
+  const inc = { start: "02:40", end: "02:44" }; // clip window [155, 172]
+  it("uses an in-window absolute timestamp as-is", () => {
+    expect(frameSeconds(inc, "02:41")).toBe(161);
+  });
+  it("clamps a below-window (clip-relative-looking) timestamp into the window", () => {
+    expect(frameSeconds(inc, "00:03")).toBe(155);
+  });
+  it("clamps an above-window timestamp to the window end", () => {
+    expect(frameSeconds(inc, "10:00")).toBe(172);
+  });
+  it("falls back to incident start when the timestamp is missing/unparseable", () => {
+    expect(frameSeconds(inc)).toBe(160);
+    expect(frameSeconds(inc, "not-a-time")).toBe(160);
   });
 });
 
