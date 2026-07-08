@@ -7,9 +7,24 @@ import {
   frameSeconds,
   findReusableUpload,
   renderDossierMarkdown,
+  mimeForVideo,
   type LedgerRow,
   type DossierItem,
 } from "./enrich-core";
+
+describe("mimeForVideo", () => {
+  it("maps common recording extensions to their Gemini-supported MIME type", () => {
+    expect(mimeForVideo("bak-owvg-rzg.mp4")).toBe("video/mp4");
+    expect(mimeForVideo("media-6a4eb5bc8df8d19fb52f172b.webm")).toBe("video/webm");
+    expect(mimeForVideo("clip.MOV")).toBe("video/quicktime");
+    expect(mimeForVideo("clip.mkv")).toBe("video/x-matroska");
+  });
+
+  it("falls back to video/mp4 for unknown/missing extensions", () => {
+    expect(mimeForVideo("recording")).toBe("video/mp4");
+    expect(mimeForVideo("recording.xyz")).toBe("video/mp4");
+  });
+});
 
 describe("readFlag", () => {
   it("reads --flag=value", () => {
