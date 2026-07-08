@@ -41,7 +41,8 @@ describe("normalizeTranscriptEvent", () => {
   it("maps Bluedot fields to internal model", () => {
     const result = normalizeTranscriptEvent(SAMPLE);
 
-    expect(result.videoId).toBe("meet.google.com/vtf-wvmj-utp");
+    expect(result.videoId).toBe("v1");
+    expect(result.meetingUrl).toBe("https://meet.google.com/vtf-wvmj-utp");
     expect(result.title).toBe("Founder chat");
     expect(result.transcriptText).toBe("A: How are you?\nB: Doing well.");
     expect(result.attendees).toEqual([
@@ -51,9 +52,30 @@ describe("normalizeTranscriptEvent", () => {
     expect(result.createdAt?.toISOString()).toBe("2025-03-04T11:38:26.000Z");
   });
 
-  it("falls back to videoId if meetingId missing", () => {
-    const r = normalizeTranscriptEvent({ ...SAMPLE, meetingId: "" });
-    expect(r.videoId).toBe("v1");
+  it("keys on videoId (per-recording) — a reused Meet code must not collide", () => {
+    // Regression for issue #5: meetingId is the ROOM (Google reuses codes);
+    // videoId is the RECORDING (unique per call). Two recordings in the same
+    // room must normalize to distinct videoIds.
+    const reusedRoom = "https://meet.google.com/www-jjni-xtd";
+    const june = normalizeTranscriptEvent({
+      ...SAMPLE,
+      meetingId: reusedRoom,
+      videoId: "5f1c2233445566778899aabb",
+    });
+    const july = normalizeTranscriptEvent({
+      ...SAMPLE,
+      meetingId: reusedRoom,
+      videoId: "6a4e745f7249289731dfa86c",
+    });
+    expect(june.videoId).toBe("5f1c2233445566778899aabb");
+    expect(july.videoId).toBe("6a4e745f7249289731dfa86c");
+    expect(june.meetingUrl).toBe(reusedRoom);
+    expect(july.meetingUrl).toBe(reusedRoom);
+  });
+
+  it("falls back to meetingId if videoId missing", () => {
+    const r = normalizeTranscriptEvent({ ...SAMPLE, videoId: "" });
+    expect(r.videoId).toBe("meet.google.com/vtf-wvmj-utp");
   });
 
   it("throws when transcript is empty", () => {
@@ -110,6 +132,16 @@ describe("normalizeSummaryEvent", () => {
   it("extracts meetingUrl when meetingId is a URL", () => {
     const r = normalizeSummaryEvent(SUMMARY_SAMPLE);
     expect(r.meetingUrl).toBe("https://meet.google.com/test");
+  });
+
+  it("keys on videoId (per-recording), not the reusable meetingId", () => {
+    const r = normalizeSummaryEvent(SUMMARY_SAMPLE);
+    expect(r.videoId).toBe("v1");
+  });
+
+  it("falls back to meetingId if videoId missing", () => {
+    const r = normalizeSummaryEvent({ ...SUMMARY_SAMPLE, videoId: "" });
+    expect(r.videoId).toBe("https://meet.google.com/test");
   });
 
   it("throws when both summary and summaryV2 missing", () => {

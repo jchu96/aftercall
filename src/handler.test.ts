@@ -9,7 +9,10 @@ beforeEach(async () => {
 });
 
 const TEST_SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw";
-const VIDEO_ID = "https://meet.google.com/test-mtg";
+// Bluedot payloads carry both: meetingId is the ROOM (reusable), videoId is
+// the RECORDING (unique per call) — rows are keyed on the recording id.
+const MEETING_URL = "https://meet.google.com/test-mtg";
+const VIDEO_ID = "v1";
 
 async function signedRequest(payload: unknown): Promise<Request> {
   const body = JSON.stringify(payload);
@@ -43,8 +46,8 @@ async function signedRequest(payload: unknown): Promise<Request> {
 function transcriptPayload() {
   return {
     type: "meeting.transcript.created",
-    meetingId: VIDEO_ID,
-    videoId: "v1",
+    meetingId: MEETING_URL,
+    videoId: VIDEO_ID,
     title: "Test sync",
     createdAt: 1741088306,
     attendees: ["alice@example.com"],
@@ -55,8 +58,8 @@ function transcriptPayload() {
 function summaryPayload() {
   return {
     type: "meeting.summary.created",
-    meetingId: VIDEO_ID,
-    videoId: "v1",
+    meetingId: MEETING_URL,
+    videoId: VIDEO_ID,
     title: "Test sync",
     createdAt: 1741087081,
     attendees: ["alice@example.com"],
@@ -149,6 +152,28 @@ describe("handleWebhook — single event arrival", () => {
     expect(row?.raw_text).toBeNull();
     expect(row?.summary).toBeTruthy();
     expect(JSON.parse(row!.action_items)).toHaveLength(2);
+  });
+});
+
+describe("handleWebhook — reused Meet code (issue #5)", () => {
+  it("two recordings in the same room ingest as distinct rows sharing a meeting_code", async () => {
+    await handleWebhook(await signedRequest(transcriptPayload()), makeDeps());
+    await handleWebhook(
+      await signedRequest({
+        ...transcriptPayload(),
+        videoId: "6a4e745f7249289731dfa86c",
+        title: "Different meeting, same room",
+      }),
+      makeDeps(),
+    );
+
+    const { results } = await env.DB
+      .prepare("SELECT video_id, meeting_code FROM transcripts ORDER BY id")
+      .all<{ video_id: string; meeting_code: string | null }>();
+    expect(results).toHaveLength(2);
+    expect(results.map((r) => r.video_id)).toEqual([VIDEO_ID, "6a4e745f7249289731dfa86c"]);
+    // Both derive the room slug from meetingId, not from the recording id.
+    expect(results.every((r) => r.meeting_code === "test-mtg")).toBe(true);
   });
 });
 

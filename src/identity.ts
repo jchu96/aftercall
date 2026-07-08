@@ -1,12 +1,13 @@
 /**
  * Meeting-identifier normalization.
  *
- * `video_id` is stored verbatim as Bluedot sends it — sometimes a full URL
- * (`https://meet.google.com/www-jjni-xtd`), sometimes a schemeless path
- * (`meet.google.com/www-jjni-xtd`), sometimes a bare code (`www-jjni-xtd`),
- * sometimes an opaque hex id. That inconsistency means an exact
- * `WHERE video_id = ?` lookup misses whenever the caller's form differs from
- * the stored form.
+ * Identifiers arrive in many forms — a full URL
+ * (`https://meet.google.com/www-jjni-xtd`), a schemeless path
+ * (`meet.google.com/www-jjni-xtd`), a bare code (`www-jjni-xtd`), or an
+ * opaque hex id. New rows key `video_id` on Bluedot's hex recording id, but
+ * legacy rows stored the URL form verbatim, and callers paste whatever they
+ * have. An exact `WHERE video_id = ?` lookup therefore misses whenever the
+ * caller's form differs from the stored form.
  *
  * `resolveMeetingCode` collapses any of those forms to a single canonical
  * code, which is persisted in the indexed `meeting_code` column at ingest and

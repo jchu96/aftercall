@@ -52,35 +52,44 @@ export function flattenTranscript(utterances: BluedotTranscriptUtterance[]): str
 }
 
 /**
+ * Derive a linkable meeting URL from Bluedot's `meetingId` (sometimes a URL
+ * "https://meet.google.com/...", sometimes a schemeless path, sometimes an
+ * opaque id). Used to link back to the meeting from Followup tasks and to
+ * derive the `meeting_code` secondary index.
+ */
+function deriveMeetingUrl(payload: BluedotWebhookPayload): string | undefined {
+  const rawMeetingId = payload.meetingId || payload.videoId;
+  if (rawMeetingId.startsWith("http://") || rawMeetingId.startsWith("https://")) {
+    return rawMeetingId;
+  }
+  if (rawMeetingId.includes("meet.google.com/") || rawMeetingId.includes("zoom.us/")) {
+    return `https://${rawMeetingId}`;
+  }
+  return undefined;
+}
+
+/**
  * Map Bluedot's payload to our internal pipeline format.
  *
- * Uses `meetingId` as the canonical id (one row per meeting). Falls back
- * to `videoId` if meetingId is missing (defensive — unlikely in practice).
+ * Uses `videoId` as the canonical id: it identifies the RECORDING and is
+ * unique per call. `meetingId` identifies the ROOM — Google Meet reuses
+ * codes across unrelated meetings, so keying on it silently drops any call
+ * that lands on a recycled code (issue #5). Falls back to `meetingId` only
+ * if videoId is missing (defensive — unobserved in practice).
  */
 export function normalizeTranscriptEvent(payload: BluedotWebhookPayload): NormalizedBluedotEvent {
   if (!payload.transcript || payload.transcript.length === 0) {
     throw new Error("Bluedot transcript event missing transcript[] array");
   }
 
-  // meetingId is sometimes a URL ("https://meet.google.com/..."), sometimes a
-  // path ("meet.google.com/..."), sometimes an opaque id. Detect URLs and
-  // surface them so we can link back to the meeting from Followup tasks.
-  const rawMeetingId = payload.meetingId || payload.videoId;
-  let meetingUrl: string | undefined;
-  if (rawMeetingId.startsWith("http://") || rawMeetingId.startsWith("https://")) {
-    meetingUrl = rawMeetingId;
-  } else if (rawMeetingId.includes("meet.google.com/") || rawMeetingId.includes("zoom.us/")) {
-    meetingUrl = `https://${rawMeetingId}`;
-  }
-
   return {
-    videoId: rawMeetingId,
+    videoId: payload.videoId || payload.meetingId,
     title: payload.title || "Untitled meeting",
     transcriptText: flattenTranscript(payload.transcript),
     attendees: (payload.attendees ?? []).map((email) => ({ email })),
     language: payload.language,
     createdAt: payload.createdAt ? new Date(payload.createdAt * 1000) : undefined,
-    meetingUrl,
+    meetingUrl: deriveMeetingUrl(payload),
   };
 }
 
@@ -119,20 +128,12 @@ export function normalizeSummaryEvent(
     throw new Error("Bluedot summary event missing summary/summaryV2 text");
   }
 
-  const rawMeetingId = payload.meetingId || payload.videoId;
-  let meetingUrl: string | undefined;
-  if (rawMeetingId.startsWith("http://") || rawMeetingId.startsWith("https://")) {
-    meetingUrl = rawMeetingId;
-  } else if (rawMeetingId.includes("meet.google.com/") || rawMeetingId.includes("zoom.us/")) {
-    meetingUrl = `https://${rawMeetingId}`;
-  }
-
   return {
-    videoId: rawMeetingId,
+    videoId: payload.videoId || payload.meetingId,
     title: payload.title || "Untitled meeting",
     summaryText,
     attendees: payload.attendees ?? [],
     createdAt: payload.createdAt ? new Date(payload.createdAt * 1000) : undefined,
-    meetingUrl,
+    meetingUrl: deriveMeetingUrl(payload),
   };
 }

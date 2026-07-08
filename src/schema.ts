@@ -36,6 +36,12 @@ export interface Participant {
  */
 export const transcripts = sqliteTable("transcripts", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  /**
+   * Bluedot's per-RECORDING id (`payload.videoId`, hex) — the uniqueness /
+   * idempotency key. Never the meeting URL: Meet codes identify a room and
+   * are reused across unrelated meetings (issue #5). Legacy rows ingested
+   * before the fix hold the URL form; both resolve via `meeting_code`.
+   */
   videoId: text("video_id").notNull().unique(),
   title: text("title").notNull(),
   rawText: text("raw_text"),
@@ -54,11 +60,12 @@ export const transcripts = sqliteTable("transcripts", {
   notionPageId: text("notion_page_id"),
   notionSyncedAt: text("notion_synced_at"),
   /**
-   * Canonical, normalized meeting identifier derived from `video_id` via
-   * `deriveMeetingCode()`. Indexed (non-unique — Zoom numeric ids can repeat;
-   * the resolver disambiguates downstream). Lets a pasted Meet URL, a
-   * schemeless path, and a bare code all resolve the same row regardless of
-   * how Bluedot happened to store `video_id`.
+   * Canonical, normalized meeting identifier derived from the room URL
+   * (Bluedot `meetingId`), falling back to `video_id` for legacy/opaque
+   * payloads. Indexed non-unique — reused Meet codes and recurring meetings
+   * legitimately map many recordings to one code; the resolver disambiguates
+   * downstream (newest first). Lets a pasted Meet URL, a schemeless path,
+   * and a bare code all resolve the same call.
    */
   meetingCode: text("meeting_code"),
   /** Number of chunks embedded into Vectorize for this transcript. */

@@ -147,7 +147,7 @@ sequenceDiagram
 
 | Invariant | How it's enforced |
 |-----------|-------------------|
-| At most one D1 row per meeting | `UNIQUE(video_id)` + `INSERT ... ON CONFLICT DO NOTHING` |
+| At most one D1 row per **recording** | `UNIQUE(video_id)` + `INSERT ... ON CONFLICT DO NOTHING` — `video_id` is Bluedot's per-recording hex id, never the Meet URL (Google reuses room codes across meetings; keying on the room silently dropped later calls — issue #5) |
 | Vector upserts are idempotent | Deterministic vector IDs: `{transcript_id}-{chunk_index}` |
 | Notion writes happen **exactly once** per meeting | Gate: `both_events_present && notion_synced_at IS NULL` → then `UPDATE notion_synced_at` |
 | Partial failures return 5xx | Svix retries; idempotency keys prevent duplicates |
@@ -295,7 +295,7 @@ This design lets every tool be unit-tested without loading the MCP SDK — criti
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | INTEGER PK | autoincrement |
-| `video_id` | TEXT UNIQUE NOT NULL | idempotency key from Bluedot (usually a Meet URL) |
+| `video_id` | TEXT UNIQUE NOT NULL | idempotency key: Bluedot's per-recording hex id (`payload.videoId`); legacy rows hold the Meet URL form |
 | `title` | TEXT NOT NULL | meeting title |
 | `raw_text` | TEXT | filled by transcript event |
 | `summary` | TEXT | filled by summary event (our extraction) |

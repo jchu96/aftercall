@@ -106,6 +106,7 @@ async function handleTranscriptEvent(
           { name: "bluedot.d1.upsert_transcript", op: "db.write" },
           () => upsertFromTranscriptEvent(deps.env.DB, {
             videoId: normalized.videoId,
+            meetingUrl: normalized.meetingUrl,
             svixId,
             title: normalized.title,
             rawText: normalized.transcriptText,
@@ -152,7 +153,7 @@ async function handleTranscriptEvent(
         log("info", "vectors_upserted", { video_id: normalized.videoId, count: vectorChunks.length });
 
         if (upsert.bothEventsPresent && !upsert.alreadyNotionSynced) {
-          await syncToNotion(deps, upsert.transcriptId, normalized.videoId);
+          await syncToNotion(deps, upsert.transcriptId, normalized.videoId, normalized.meetingUrl);
         }
 
         return new Response("OK", { status: 200 });
@@ -227,6 +228,7 @@ async function handleSummaryEvent(
           { name: "bluedot.d1.upsert_summary", op: "db.write" },
           () => upsertFromSummaryEvent(deps.env.DB, {
             videoId: normalized.videoId,
+            meetingUrl: normalized.meetingUrl,
             svixId,
             title: normalized.title,
             summary: normalized.summaryText,
@@ -243,7 +245,7 @@ async function handleSummaryEvent(
         });
 
         if (upsert.bothEventsPresent && !upsert.alreadyNotionSynced) {
-          await syncToNotion(deps, upsert.transcriptId, normalized.videoId);
+          await syncToNotion(deps, upsert.transcriptId, normalized.videoId, normalized.meetingUrl);
         } else if (!upsert.bothEventsPresent) {
           log("info", "notion_deferred_awaiting_other_event", { video_id: normalized.videoId });
         }
@@ -273,6 +275,7 @@ async function syncToNotion(
   deps: HandlerDeps,
   transcriptId: number,
   videoId: string,
+  normalizedMeetingUrl?: string,
 ): Promise<void> {
   const row = await deps.env.DB
     .prepare(
@@ -301,8 +304,11 @@ async function syncToNotion(
 
   const participants = JSON.parse(row.participants) as Participant[];
   const actionItems = JSON.parse(row.action_items) as ActionItem[];
+  // Prefer the room URL from the payload — videoId is now the hex recording
+  // id and only URL-shaped on legacy rows.
   const meetingUrl =
-    videoId.startsWith("http") ? videoId : videoId.includes("meet.google.com/") || videoId.includes("zoom.us/") ? `https://${videoId}` : undefined;
+    normalizedMeetingUrl ??
+    (videoId.startsWith("http") ? videoId : videoId.includes("meet.google.com/") || videoId.includes("zoom.us/") ? `https://${videoId}` : undefined);
 
   let pageId: string | undefined;
   try {
@@ -316,6 +322,7 @@ async function syncToNotion(
           participants,
           actionItems,
           videoId,
+          meetingUrl,
           language: row.language,
           createdAt: new Date(row.created_at + "Z"),
         },
