@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-07-08
+
+**Recording-id dedup: reused Meet codes no longer drop calls.** Google Meet recycles room codes, and ingestion keyed `UNIQUE(video_id)` on the meeting URL — so a later call in a reused room collided with the earlier row and silently never ingested (#5; the 2026-07-08 LGCY BOM session vanished behind the 2026-06-15 call this way). Ships the optional Gemini video-enrichment workflow as well.
+
+### Fixed
+
+- **Ingestion keys on Bluedot's per-recording hex id** (`payload.videoId`) instead of the reusable room URL (`payload.meetingId`). Two recordings in the same room now insert as distinct rows. No migration — legacy rows keep their URL-shaped `video_id` and still resolve via exact match or `meeting_code`. (#5, PR #6)
+- **`meeting_code` derives from the raw room id** (URL, schemeless path, or bare-slug `meetingId` all resolve), so identifier lookup keeps the Meet slug now that `video_id` is a hex id.
+- **Reused-code disambiguation is newest-first** — `get_call` / `find_call` / `answer_from_transcript` list all recordings under a code with the most recent leading; `enrich-video` picks the newest transcript row.
+- Notion transcript pages now populate **`Recording URL`** (was silently never set).
+- Removed a literal NUL byte in `src/mcp/resolve.ts` that made git treat the file as binary (diffs wouldn't render on GitHub).
+
 ### Added
 
 - **Video enrichment (optional, script-only): `scripts/enrich-video.ts`** — point it at a screen recording of a call and it uploads the video to Google Gemini, analyzes it *with the call's transcript as context* (resolved from the filename's meeting code via `resolveMeetingCode()`), and writes an issue-grade dossier of on-screen problems: verbatim UI text, the reporter's quote, the click-path as performed, a screenshot per incident, and the app URL when a browser address bar is legible. Two-pass (cheap low-res whole-call index → targeted medium-res per-incident read that also discards false positives). Output + a re-run ledger land under git-ignored `staging/dossiers/`. `npm run enrich -- "<recording>"`.
@@ -175,6 +187,8 @@ Initial public release. Bluedot → Cloudflare D1 + Vectorize → Notion Followu
 - Interactive `npm run setup` script that provisions D1, Vectorize, both Notion databases, and writes `.dev.vars` + `wrangler.toml`.
 - Migration script for historical Neon transcripts → D1 + Vectorize + Followups.
 
+[0.7.0]: https://github.com/jchu96/aftercall/releases/tag/v0.7.0
+[0.6.0]: https://github.com/jchu96/aftercall/releases/tag/v0.6.0
 [0.5.0]: https://github.com/jchu96/aftercall/releases/tag/v0.5.0
 [0.4.0]: https://github.com/jchu96/aftercall/releases/tag/v0.4.0
 [0.3.0]: https://github.com/jchu96/aftercall/releases/tag/v0.3.0
