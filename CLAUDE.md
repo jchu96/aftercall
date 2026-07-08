@@ -23,7 +23,7 @@ Single user (GitHub username allowlist via `ALLOWED_USERS` env). Friends fork to
 - **Conventional Commits** — `feat:`, `fix:`, `chore:`, `docs:`, etc.
 - **Feature branches, not straight-to-main** — every new feature, fix, or non-trivial chore goes on a branch named `feat/...`, `fix/...`, `chore/...`, or `docs/...`. PR → self-review → squash-merge to `main`. Only the rarest exception (typo fix, one-line docs) merits a direct push. Previous commits on main are grandfathered; new work follows this rule.
 - **Conductor** — project context lives in `conductor/` (product.md, tech-stack.md, workflow.md, tracks.md). New multi-phase features create a track spec before implementation. Setup state (`setup_state.json`) is gitignored; decision artifacts are committed.
-- **Idempotency** is non-negotiable — D1 has `UNIQUE(video_id)`, Vectorize uses deterministic IDs (`{transcript_id}-{chunk_index}`)
+- **Idempotency** is non-negotiable — D1 has `UNIQUE(video_id)`, Vectorize uses deterministic IDs (`{transcript_id}-{chunk_index}`). `video_id` is Bluedot's **per-recording** id (`payload.videoId`, a hex id) — never key on `payload.meetingId`: it identifies the *room* and Google Meet reuses codes across unrelated meetings, silently dropping later calls (issue #5). The room URL feeds the non-unique `meeting_code` index instead.
 - **D1 write FIRST** in the handler — gates Notion writes so concurrent retries dedupe before any side effects
 - **Notion failures are non-fatal** — D1 is source of truth; Notion is a derived view
 - **Pipeline failures return 500** so Svix retries

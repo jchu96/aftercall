@@ -139,4 +139,50 @@ describe("meeting_code population", () => {
     await upsertFromSummaryEvent(env.DB, summaryInput);
     expect(await codeFor(VIDEO_ID)).toBe("test");
   });
+
+  it("prefers the caller-supplied meetingCode over video_id (hex recording id)", async () => {
+    await upsertFromTranscriptEvent(env.DB, {
+      ...transcriptInput,
+      videoId: "6a4e745f7249289731dfa86c",
+      meetingCode: "www-jjni-xtd",
+    });
+    expect(await codeFor("6a4e745f7249289731dfa86c")).toBe("www-jjni-xtd");
+  });
+
+  it("summary event also prefers the caller-supplied meetingCode", async () => {
+    await upsertFromSummaryEvent(env.DB, {
+      ...summaryInput,
+      videoId: "6a4e745f7249289731dfa86c",
+      meetingCode: "www-jjni-xtd",
+    });
+    expect(await codeFor("6a4e745f7249289731dfa86c")).toBe("www-jjni-xtd");
+  });
+});
+
+describe("reused Meet code (issue #5)", () => {
+  it("two recordings in the same room insert as distinct rows sharing a meeting_code", async () => {
+    const room = "www-jjni-xtd";
+    const june = await upsertFromTranscriptEvent(env.DB, {
+      ...transcriptInput,
+      videoId: "5f1c2233445566778899aabb",
+      meetingCode: room,
+      title: "Design tool soft launch",
+    });
+    const july = await upsertFromTranscriptEvent(env.DB, {
+      ...transcriptInput,
+      videoId: "6a4e745f7249289731dfa86c",
+      meetingCode: room,
+      title: "Design tool soft launch",
+    });
+
+    expect(june.inserted).toBe(true);
+    expect(july.inserted).toBe(true);
+    expect(july.transcriptId).not.toBe(june.transcriptId);
+
+    const { results } = await env.DB
+      .prepare("SELECT video_id, meeting_code FROM transcripts WHERE meeting_code = ?1")
+      .bind("www-jjni-xtd")
+      .all<{ video_id: string; meeting_code: string }>();
+    expect(results).toHaveLength(2);
+  });
 });

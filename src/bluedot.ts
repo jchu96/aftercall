@@ -7,6 +7,8 @@
  * generates structured output from the transcript).
  */
 
+import { resolveMeetingCode } from "./identity";
+
 export type BluedotEventType = "transcript" | "summary" | string;
 
 export interface BluedotTranscriptUtterance {
@@ -36,6 +38,8 @@ export interface NormalizedBluedotEvent {
   language?: string;
   createdAt?: Date;
   meetingUrl?: string;
+  /** Canonical room code from `meetingId` (URL, path, or bare slug), for the `meeting_code` index. */
+  meetingCode: string | null;
 }
 
 /**
@@ -52,35 +56,58 @@ export function flattenTranscript(utterances: BluedotTranscriptUtterance[]): str
 }
 
 /**
+ * Derive a linkable meeting URL from Bluedot's `meetingId` (sometimes a URL
+ * "https://meet.google.com/...", sometimes a schemeless path, sometimes an
+ * opaque id). Used to link back to the meeting from Followup tasks and to
+ * derive the `meeting_code` secondary index.
+ */
+function deriveMeetingUrl(payload: BluedotWebhookPayload): string | undefined {
+  const rawMeetingId = payload.meetingId || payload.videoId;
+  if (rawMeetingId.startsWith("http://") || rawMeetingId.startsWith("https://")) {
+    return rawMeetingId;
+  }
+  if (rawMeetingId.includes("meet.google.com/") || rawMeetingId.includes("zoom.us/")) {
+    return `https://${rawMeetingId}`;
+  }
+  return undefined;
+}
+
+/**
+ * Canonical room code from the raw `meetingId` — NOT from the derived URL,
+ * because Bluedot also sends bare slugs ("www-jjni-xtd") that don't yield a
+ * URL but still carry the room identity. Falls back to `videoId` so opaque
+ * payloads remain code-addressable by their hex id.
+ */
+function deriveMeetingCode(payload: BluedotWebhookPayload): string | null {
+  return (
+    (payload.meetingId ? resolveMeetingCode(payload.meetingId) : null) ??
+    resolveMeetingCode(payload.videoId)
+  );
+}
+
+/**
  * Map Bluedot's payload to our internal pipeline format.
  *
- * Uses `meetingId` as the canonical id (one row per meeting). Falls back
- * to `videoId` if meetingId is missing (defensive — unlikely in practice).
+ * Uses `videoId` as the canonical id: it identifies the RECORDING and is
+ * unique per call. `meetingId` identifies the ROOM — Google Meet reuses
+ * codes across unrelated meetings, so keying on it silently drops any call
+ * that lands on a recycled code (issue #5). Falls back to `meetingId` only
+ * if videoId is missing (defensive — unobserved in practice).
  */
 export function normalizeTranscriptEvent(payload: BluedotWebhookPayload): NormalizedBluedotEvent {
   if (!payload.transcript || payload.transcript.length === 0) {
     throw new Error("Bluedot transcript event missing transcript[] array");
   }
 
-  // meetingId is sometimes a URL ("https://meet.google.com/..."), sometimes a
-  // path ("meet.google.com/..."), sometimes an opaque id. Detect URLs and
-  // surface them so we can link back to the meeting from Followup tasks.
-  const rawMeetingId = payload.meetingId || payload.videoId;
-  let meetingUrl: string | undefined;
-  if (rawMeetingId.startsWith("http://") || rawMeetingId.startsWith("https://")) {
-    meetingUrl = rawMeetingId;
-  } else if (rawMeetingId.includes("meet.google.com/") || rawMeetingId.includes("zoom.us/")) {
-    meetingUrl = `https://${rawMeetingId}`;
-  }
-
   return {
-    videoId: rawMeetingId,
+    videoId: payload.videoId || payload.meetingId,
     title: payload.title || "Untitled meeting",
     transcriptText: flattenTranscript(payload.transcript),
     attendees: (payload.attendees ?? []).map((email) => ({ email })),
     language: payload.language,
     createdAt: payload.createdAt ? new Date(payload.createdAt * 1000) : undefined,
-    meetingUrl,
+    meetingUrl: deriveMeetingUrl(payload),
+    meetingCode: deriveMeetingCode(payload),
   };
 }
 
@@ -109,6 +136,7 @@ export interface NormalizedSummaryEvent {
   attendees: string[];
   createdAt?: Date;
   meetingUrl?: string;
+  meetingCode: string | null;
 }
 
 export function normalizeSummaryEvent(
@@ -119,20 +147,13 @@ export function normalizeSummaryEvent(
     throw new Error("Bluedot summary event missing summary/summaryV2 text");
   }
 
-  const rawMeetingId = payload.meetingId || payload.videoId;
-  let meetingUrl: string | undefined;
-  if (rawMeetingId.startsWith("http://") || rawMeetingId.startsWith("https://")) {
-    meetingUrl = rawMeetingId;
-  } else if (rawMeetingId.includes("meet.google.com/") || rawMeetingId.includes("zoom.us/")) {
-    meetingUrl = `https://${rawMeetingId}`;
-  }
-
   return {
-    videoId: rawMeetingId,
+    videoId: payload.videoId || payload.meetingId,
     title: payload.title || "Untitled meeting",
     summaryText,
     attendees: payload.attendees ?? [],
     createdAt: payload.createdAt ? new Date(payload.createdAt * 1000) : undefined,
-    meetingUrl,
+    meetingUrl: deriveMeetingUrl(payload),
+    meetingCode: deriveMeetingCode(payload),
   };
 }

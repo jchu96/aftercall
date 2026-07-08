@@ -127,7 +127,7 @@ function fetchContext(code: string): CallContext | null {
     [
       "wrangler", "d1", "execute", D1_NAME, "--remote", "--json",
       "--command",
-      `SELECT title, summary, action_items, created_at FROM transcripts WHERE meeting_code='${code.replace(/'/g, "''")}' OR video_id LIKE '%${code.replace(/'/g, "''")}%' LIMIT 1`,
+      `SELECT title, summary, action_items, created_at FROM transcripts WHERE meeting_code='${code.replace(/'/g, "''")}' OR video_id LIKE '%${code.replace(/'/g, "''")}%' ORDER BY created_at DESC LIMIT 1`,
     ],
     { encoding: "utf8", maxBuffer: 50 * 1024 * 1024 },
   );

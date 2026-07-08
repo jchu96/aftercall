@@ -43,7 +43,7 @@ flowchart LR
 
 Every Bluedot recording becomes:
 
-1. **A D1 row** — `transcripts` table, idempotent on `video_id`, holding raw text + structured summary + participants + action items.
+1. **A D1 row** — `transcripts` table, idempotent on `video_id` (Bluedot's per-recording id — not the Meet URL, which Google reuses across meetings), holding raw text + structured summary + participants + action items.
 2. **Embedded chunks** in Cloudflare Vectorize (1536d, cosine) for semantic search.
 3. **A Notion Transcripts row** — metadata hub (Date, Participants, Recording URL, link to Bluedot's native summary page). No duplicated summary content — Bluedot's own Notion sync owns that.
 4. **One Followup row per action item** in a Notion inbox — `Status = Inbox`, linked via a `Meeting` relation back to the Transcripts row, ready to triage.
@@ -135,7 +135,7 @@ Full OAuth + Bluedot + debug walkthrough: [`docs/auth.md`](./docs/auth.md).
 | [`find_action_items_for(person, since?)`](./docs/tools.md#find_action_items_for) | All action items assigned to a person (substring match on owner) |
 | [`recent_calls(days?)`](./docs/tools.md#recent_calls) | Last N days of calls, newest first |
 
-> **Identifier vs. topic:** `search_calls` is for *what was discussed* (semantic). `find_call` is for *which specific meeting* (a pasted URL, code, title, or name). `video_id` is stored verbatim as Bluedot sends it (URL / schemeless path / hex), so an indexed `meeting_code` column — derived via `resolveMeetingCode()` at ingest — lets any form resolve the same call. Re-derive existing rows with `npx tsx scripts/reindex-vectorize.ts` (also re-embeds with the speaker-aware chunker).
+> **Identifier vs. topic:** `search_calls` is for *what was discussed* (semantic). `find_call` is for *which specific meeting* (a pasted URL, code, title, or name). `video_id` is Bluedot's per-recording hex id on new rows (legacy rows hold the URL form verbatim), so an indexed, non-unique `meeting_code` column — derived from the room URL via `resolveMeetingCode()` at ingest — lets any form resolve the same call. A reused Meet code maps to multiple recordings; the resolver lists them newest first. Re-derive existing rows with `npx tsx scripts/reindex-vectorize.ts` (also re-embeds with the speaker-aware chunker).
 
 Sample prompts per tool: [`docs/tools.md`](./docs/tools.md).
 

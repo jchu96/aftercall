@@ -2,7 +2,10 @@ import type { ActionItem, Participant } from "./schema";
 import { resolveMeetingCode } from "./identity";
 
 export interface TranscriptEventInput {
+  /** Per-recording id (Bluedot `videoId`) — the uniqueness/idempotency key. */
   videoId: string;
+  /** Canonical room code (from Bluedot `meetingId`) — the `meeting_code` secondary index. */
+  meetingCode?: string | null;
   svixId: string;
   title: string;
   rawText: string;
@@ -12,12 +15,22 @@ export interface TranscriptEventInput {
 
 export interface SummaryEventInput {
   videoId: string;
+  meetingCode?: string | null;
   svixId: string;
   title: string;
   bluedotSummary: string;
   summary: string;
   participants: Participant[];
   actionItems: ActionItem[];
+}
+
+/**
+ * meeting_code comes from the room id when the caller supplied one —
+ * `video_id` is the hex recording id, which would otherwise become the code
+ * and lose the Meet slug. Falls back to the videoId form for legacy callers.
+ */
+function deriveMeetingCode(input: { videoId: string; meetingCode?: string | null }): string | null {
+  return input.meetingCode ?? resolveMeetingCode(input.videoId);
 }
 
 export interface UpsertResult {
@@ -83,7 +96,7 @@ export async function upsertFromTranscriptEvent(
       input.language ?? null,
       JSON.stringify(input.participants),
       input.svixId,
-      resolveMeetingCode(input.videoId),
+      deriveMeetingCode(input),
     )
     .first<{ id: number } | null>();
 
@@ -161,7 +174,7 @@ export async function upsertFromSummaryEvent(
       JSON.stringify(input.participants),
       JSON.stringify(input.actionItems),
       input.svixId,
-      resolveMeetingCode(input.videoId),
+      deriveMeetingCode(input),
     )
     .first<{ id: number } | null>();
 

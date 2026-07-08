@@ -74,6 +74,24 @@ describe("getCall", () => {
     expect(text.toLowerCase()).toMatch(/multiple|pick|which/);
   });
 
+  it("lists the newest recording first when a reused code matches multiple rows (issue #5)", async () => {
+    // Google recycles Meet codes across unrelated meetings — the June and July
+    // calls share a room code but are distinct recordings. Newest first so the
+    // most likely intended call leads the list.
+    await env.DB.prepare(
+      `INSERT INTO transcripts (video_id, title, meeting_code, summary, participants, action_items, created_at)
+       VALUES ('5f1c2233445566778899aabb','Design tool soft launch','www-jjni-xtd','s','[]','[]','2026-06-15 17:00:00'),
+              ('6a4e745f7249289731dfa86c','Design tool soft launch','www-jjni-xtd','s','[]','[]','2026-07-08 17:00:00')`,
+    ).run();
+
+    const out = await getCall({ video_id: "www-jjni-xtd" }, env);
+    const text = out.content[0].text;
+    expect(text.indexOf("6a4e745f7249289731dfa86c")).toBeGreaterThan(-1);
+    expect(text.indexOf("6a4e745f7249289731dfa86c")).toBeLessThan(
+      text.indexOf("5f1c2233445566778899aabb"),
+    );
+  });
+
   it("returns a disambiguation list (not a guessed row) when a fuzzy query matches multiple", async () => {
     await env.DB.prepare(
       `INSERT INTO transcripts (video_id, title, meeting_code, summary, participants, action_items)
