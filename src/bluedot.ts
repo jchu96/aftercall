@@ -7,6 +7,8 @@
  * generates structured output from the transcript).
  */
 
+import { resolveMeetingCode } from "./identity";
+
 export type BluedotEventType = "transcript" | "summary" | string;
 
 export interface BluedotTranscriptUtterance {
@@ -36,6 +38,8 @@ export interface NormalizedBluedotEvent {
   language?: string;
   createdAt?: Date;
   meetingUrl?: string;
+  /** Canonical room code from `meetingId` (URL, path, or bare slug), for the `meeting_code` index. */
+  meetingCode: string | null;
 }
 
 /**
@@ -69,6 +73,19 @@ function deriveMeetingUrl(payload: BluedotWebhookPayload): string | undefined {
 }
 
 /**
+ * Canonical room code from the raw `meetingId` — NOT from the derived URL,
+ * because Bluedot also sends bare slugs ("www-jjni-xtd") that don't yield a
+ * URL but still carry the room identity. Falls back to `videoId` so opaque
+ * payloads remain code-addressable by their hex id.
+ */
+function deriveMeetingCode(payload: BluedotWebhookPayload): string | null {
+  return (
+    (payload.meetingId ? resolveMeetingCode(payload.meetingId) : null) ??
+    resolveMeetingCode(payload.videoId)
+  );
+}
+
+/**
  * Map Bluedot's payload to our internal pipeline format.
  *
  * Uses `videoId` as the canonical id: it identifies the RECORDING and is
@@ -90,6 +107,7 @@ export function normalizeTranscriptEvent(payload: BluedotWebhookPayload): Normal
     language: payload.language,
     createdAt: payload.createdAt ? new Date(payload.createdAt * 1000) : undefined,
     meetingUrl: deriveMeetingUrl(payload),
+    meetingCode: deriveMeetingCode(payload),
   };
 }
 
@@ -118,6 +136,7 @@ export interface NormalizedSummaryEvent {
   attendees: string[];
   createdAt?: Date;
   meetingUrl?: string;
+  meetingCode: string | null;
 }
 
 export function normalizeSummaryEvent(
@@ -135,5 +154,6 @@ export function normalizeSummaryEvent(
     attendees: payload.attendees ?? [],
     createdAt: payload.createdAt ? new Date(payload.createdAt * 1000) : undefined,
     meetingUrl: deriveMeetingUrl(payload),
+    meetingCode: deriveMeetingCode(payload),
   };
 }

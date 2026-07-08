@@ -106,7 +106,7 @@ async function handleTranscriptEvent(
           { name: "bluedot.d1.upsert_transcript", op: "db.write" },
           () => upsertFromTranscriptEvent(deps.env.DB, {
             videoId: normalized.videoId,
-            meetingUrl: normalized.meetingUrl,
+            meetingCode: normalized.meetingCode,
             svixId,
             title: normalized.title,
             rawText: normalized.transcriptText,
@@ -228,7 +228,7 @@ async function handleSummaryEvent(
           { name: "bluedot.d1.upsert_summary", op: "db.write" },
           () => upsertFromSummaryEvent(deps.env.DB, {
             videoId: normalized.videoId,
-            meetingUrl: normalized.meetingUrl,
+            meetingCode: normalized.meetingCode,
             svixId,
             title: normalized.title,
             summary: normalized.summaryText,

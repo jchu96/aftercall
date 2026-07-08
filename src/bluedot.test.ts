@@ -78,6 +78,24 @@ describe("normalizeTranscriptEvent", () => {
     expect(r.videoId).toBe("meet.google.com/vtf-wvmj-utp");
   });
 
+  it("derives meetingCode from a schemeless-path meetingId", () => {
+    const r = normalizeTranscriptEvent(SAMPLE);
+    expect(r.meetingCode).toBe("vtf-wvmj-utp");
+  });
+
+  it("derives meetingCode from a BARE-SLUG meetingId (no scheme, no host)", () => {
+    // Bluedot has been observed sending meetingId as a bare code — the room
+    // identity must survive even though no meetingUrl can be derived from it.
+    const r = normalizeTranscriptEvent({
+      ...SAMPLE,
+      meetingId: "www-jjni-xtd",
+      videoId: "6a4e745f7249289731dfa86c",
+    });
+    expect(r.videoId).toBe("6a4e745f7249289731dfa86c");
+    expect(r.meetingUrl).toBeUndefined();
+    expect(r.meetingCode).toBe("www-jjni-xtd");
+  });
+
   it("throws when transcript is empty", () => {
     expect(() =>
       normalizeTranscriptEvent({ ...SAMPLE, transcript: [] }),
@@ -142,6 +160,11 @@ describe("normalizeSummaryEvent", () => {
   it("falls back to meetingId if videoId missing", () => {
     const r = normalizeSummaryEvent({ ...SUMMARY_SAMPLE, videoId: "" });
     expect(r.videoId).toBe("https://meet.google.com/test");
+  });
+
+  it("derives meetingCode from a bare-slug meetingId", () => {
+    const r = normalizeSummaryEvent({ ...SUMMARY_SAMPLE, meetingId: "www-jjni-xtd" });
+    expect(r.meetingCode).toBe("www-jjni-xtd");
   });
 
   it("throws when both summary and summaryV2 missing", () => {

@@ -60,9 +60,9 @@ export const transcripts = sqliteTable("transcripts", {
   notionPageId: text("notion_page_id"),
   notionSyncedAt: text("notion_synced_at"),
   /**
-   * Canonical, normalized meeting identifier derived from the room URL
-   * (Bluedot `meetingId`), falling back to `video_id` for legacy/opaque
-   * payloads. Indexed non-unique — reused Meet codes and recurring meetings
+   * Canonical, normalized meeting identifier derived from the room id
+   * (Bluedot `meetingId` — URL, schemeless path, or bare slug), falling back
+   * to `video_id` for legacy/opaque payloads. Indexed non-unique — reused Meet codes and recurring meetings
    * legitimately map many recordings to one code; the resolver disambiguates
    * downstream (newest first). Lets a pasted Meet URL, a schemeless path,
    * and a bare code all resolve the same call.

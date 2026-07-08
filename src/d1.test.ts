@@ -140,20 +140,20 @@ describe("meeting_code population", () => {
     expect(await codeFor(VIDEO_ID)).toBe("test");
   });
 
-  it("prefers meetingUrl over video_id for meeting_code (hex recording id)", async () => {
+  it("prefers the caller-supplied meetingCode over video_id (hex recording id)", async () => {
     await upsertFromTranscriptEvent(env.DB, {
       ...transcriptInput,
       videoId: "6a4e745f7249289731dfa86c",
-      meetingUrl: "https://meet.google.com/www-jjni-xtd",
+      meetingCode: "www-jjni-xtd",
     });
     expect(await codeFor("6a4e745f7249289731dfa86c")).toBe("www-jjni-xtd");
   });
 
-  it("summary event also prefers meetingUrl for meeting_code", async () => {
+  it("summary event also prefers the caller-supplied meetingCode", async () => {
     await upsertFromSummaryEvent(env.DB, {
       ...summaryInput,
       videoId: "6a4e745f7249289731dfa86c",
-      meetingUrl: "https://meet.google.com/www-jjni-xtd",
+      meetingCode: "www-jjni-xtd",
     });
     expect(await codeFor("6a4e745f7249289731dfa86c")).toBe("www-jjni-xtd");
   });
@@ -161,17 +161,17 @@ describe("meeting_code population", () => {
 
 describe("reused Meet code (issue #5)", () => {
   it("two recordings in the same room insert as distinct rows sharing a meeting_code", async () => {
-    const room = "https://meet.google.com/www-jjni-xtd";
+    const room = "www-jjni-xtd";
     const june = await upsertFromTranscriptEvent(env.DB, {
       ...transcriptInput,
       videoId: "5f1c2233445566778899aabb",
-      meetingUrl: room,
+      meetingCode: room,
       title: "Design tool soft launch",
     });
     const july = await upsertFromTranscriptEvent(env.DB, {
       ...transcriptInput,
       videoId: "6a4e745f7249289731dfa86c",
-      meetingUrl: room,
+      meetingCode: room,
       title: "Design tool soft launch",
     });
 
