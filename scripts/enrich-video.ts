@@ -39,6 +39,7 @@ import {
   frameSeconds,
   findReusableUpload,
   renderDossierMarkdown,
+  mimeForVideo,
   type Incident,
   type IssueDetail,
   type CallContext,
@@ -360,7 +361,7 @@ async function main() {
     process.exit(1);
   }
   info(`Meeting code: ${code}`);
-  const mimeType = "video/mp4";
+  const mimeType = mimeForVideo(basename(absVideo));
   const bytes = statSync(absVideo).size;
 
   // Reuse a still-live upload if the ledger has one AND Gemini still has it.

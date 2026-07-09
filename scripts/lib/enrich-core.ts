@@ -82,6 +82,28 @@ export function deriveCode(filename: string, override?: string): string | null {
 }
 
 /**
+ * Gemini-supported video MIME type for a recording, by file extension. Google
+ * Meet exports `.webm`; Zoom/others `.mp4`/`.mov`. Declaring the wrong type on
+ * upload makes the Files API mis-handle the stream, so map explicitly and fall
+ * back to `video/mp4` for anything unrecognized.
+ */
+export function mimeForVideo(filename: string): string {
+  const ext = filename.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
+  switch (ext) {
+    case "webm": return "video/webm";
+    case "mov": return "video/quicktime";
+    case "mkv": return "video/x-matroska";
+    case "mpeg": case "mpg": return "video/mpeg";
+    case "avi": return "video/x-msvideo";
+    case "flv": return "video/x-flv";
+    case "wmv": return "video/x-ms-wmv";
+    case "3gp": case "3gpp": return "video/3gpp";
+    case "mp4": case "m4v": return "video/mp4";
+    default: return "video/mp4";
+  }
+}
+
+/**
  * Interrogation window for an incident: widen a touch around the index-pass
  * timestamps (which are approximate) so a slightly-mistimed entry is still in
  * frame. Returns `{start,end}` in whole seconds, start clamped at 0.
