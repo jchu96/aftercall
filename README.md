@@ -1,4 +1,37 @@
-# aftercall
+# aftercall (superseded)
+
+> [!IMPORTANT]
+> ## Project status: superseded by Frame of Mind
+>
+> This repository is preserved as a historical implementation and reference for
+> existing deployments. It is no longer the active home for this work.
+>
+> [Bluedot](https://help.bluedothq.com/en/articles/14708332-bluedot-mcp)
+> and [Granola](https://docs.granola.ai/help-center/sharing/integrations/mcp)
+> now provide first-party MCP servers for browsing meetings, retrieving
+> transcripts or notes, and searching meeting history. Those provider-owned
+> integrations replace the custom meeting-retrieval layer that aftercall was
+> originally built to supply.
+>
+> New development continues in
+> **[Frame of Mind](https://github.com/jchu96/frame-of-mind)**: a
+> provider-neutral workflow that combines context from Bluedot, Granola, or a
+> local transcript with a screen recording and Gemini video understanding.
+
+## What should I use?
+
+| Goal | Recommended path |
+|---|---|
+| Search Bluedot meetings or retrieve transcripts and summaries | [Bluedot MCP](https://help.bluedothq.com/en/articles/14708332-bluedot-mcp) |
+| Search Granola notes or retrieve available transcripts | [Granola MCP](https://docs.granola.ai/help-center/sharing/integrations/mcp) |
+| Combine meeting context with a recording to produce structured analysis | [Frame of Mind](https://github.com/jchu96/frame-of-mind) |
+| Maintain or study an existing aftercall Worker deployment | Continue with the legacy documentation below; new product work is not planned here |
+
+The remainder of this README documents the legacy aftercall system.
+
+---
+
+## Legacy project
 
 > Search and ask questions about your meetings using AI.
 >
@@ -384,4 +417,3 @@ Not promises — just ideas on the shortlist. File an issue if you want to prior
 ## License
 
 MIT — see [LICENSE](./LICENSE).
-

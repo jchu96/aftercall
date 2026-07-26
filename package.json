@@ -2,7 +2,7 @@
   "name": "aftercall",
   "version": "0.7.0",
   "private": false,
-  "description": "Auto-ingest Bluedot meeting transcripts into Cloudflare D1 + Vectorize, route action items into a Notion Followups inbox, and query the indexed calls from Claude.ai via MCP.",
+  "description": "Historical Bluedot meeting-ingestion Worker, superseded by provider-native MCP servers and jchu96/frame-of-mind.",
   "license": "MIT",
   "type": "module",
   "scripts": {

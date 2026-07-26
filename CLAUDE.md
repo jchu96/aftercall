@@ -1,5 +1,16 @@
 # aftercall
 
+> [!IMPORTANT]
+> This repository has been superseded. Bluedot and Granola now provide
+> first-party MCP servers for meeting retrieval, and active development of the
+> recording-plus-context analysis workflow has moved to
+> [jchu96/frame-of-mind](https://github.com/jchu96/frame-of-mind).
+>
+> Treat this codebase as a historical/reference implementation unless the task
+> explicitly concerns an existing aftercall deployment. Do not start new
+> product work here; route it to Frame of Mind. See the status and migration
+> guidance at the top of [README.md](./README.md).
+
 Cloudflare Worker that ingests Bluedot meeting transcripts → OpenAI extraction + embeddings → Cloudflare D1 + Vectorize → Notion (transcript pages + Followups task DB). Exposes an MCP server at `/mcp` with GitHub OAuth so the indexed calls are queryable from Claude.ai.
 
 ## Architecture
