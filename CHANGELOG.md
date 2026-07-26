@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Changed
+
+- Marked aftercall as superseded by the first-party Bluedot and Granola MCP
+  servers plus [Frame of Mind](https://github.com/jchu96/frame-of-mind), where
+  active recording-and-meeting-context analysis development now continues.
+
 ## [0.7.0] — 2026-07-08
 
 **Recording-id dedup: reused Meet codes no longer drop calls.** Google Meet recycles room codes, and ingestion keyed `UNIQUE(video_id)` on the meeting URL — so a later call in a reused room collided with the earlier row and silently never ingested (#5; the 2026-07-08 LGCY BOM session vanished behind the 2026-06-15 call this way). Ships the optional Gemini video-enrichment workflow as well.
